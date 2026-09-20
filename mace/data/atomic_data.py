@@ -7,6 +7,8 @@
 from copy import deepcopy
 from typing import Optional, Sequence
 
+import ase.data
+import numpy as np
 import torch.utils.data
 
 from mace.tools import (
@@ -54,6 +56,10 @@ class AtomicData(torch_geometric.data.Data):
     volume: torch.Tensor
     fermi_level: torch.Tensor
     external_field: torch.Tensor
+    hessian: torch.Tensor  # [9 N^2] flattened row-major (3N x 3N), empty when absent
+    hessian_weight: torch.Tensor  # [,]
+    has_hessian: torch.Tensor  # [,] bool
+    sqrt_masses: torch.Tensor  # [n_nodes] amu^1/2
 
     def __init__(
         self,
@@ -88,10 +94,27 @@ class AtomicData(torch_geometric.data.Data):
         volume: Optional[torch.Tensor] = None,  # [,]
         fermi_level: Optional[torch.Tensor] = None,  # [,]
         external_field: Optional[torch.Tensor] = None,  # [1,3]
+        hessian: Optional[torch.Tensor] = None,  # [9 n_nodes^2] or [0]
+        hessian_weight: Optional[torch.Tensor] = None,  # [,]
+        has_hessian: Optional[torch.Tensor] = None,  # [,] bool
+        sqrt_masses: Optional[torch.Tensor] = None,  # [n_nodes]
         **extra_data: torch.Tensor,
     ):
         # Check shapes
         num_nodes = node_attrs.shape[0]
+        # The Hessian label rides along as a 1-D tensor so that batches concatenate it
+        # like `ptr` (torch_geometric's default cat dim 0); a loss slices graph k's block
+        # by cumsum(9 n_k^2) over the graphs with `has_hessian`.
+        if hessian is None:
+            hessian = torch.zeros(0, dtype=positions.dtype)
+        if has_hessian is None:
+            has_hessian = torch.tensor(hessian.numel() > 0)
+        if hessian_weight is None:
+            hessian_weight = torch.tensor(1.0, dtype=positions.dtype)
+        assert len(hessian.shape) == 1 and hessian.numel() in (0, 9 * num_nodes * num_nodes)
+        assert len(has_hessian.shape) == 0 and has_hessian.dtype == torch.bool
+        assert len(hessian_weight.shape) == 0
+        assert sqrt_masses is None or sqrt_masses.shape == (num_nodes,)
 
         assert edge_index.shape[0] == 2 and len(edge_index.shape) == 2
         assert positions.shape == (num_nodes, 3)
@@ -160,6 +183,10 @@ class AtomicData(torch_geometric.data.Data):
             "volume": volume,
             "fermi_level": fermi_level,
             "external_field": external_field,
+            "hessian": hessian,
+            "hessian_weight": hessian_weight,
+            "has_hessian": has_hessian,
+            "sqrt_masses": sqrt_masses,
         }
         data.update(extra_data)
         super().__init__(**data)
@@ -396,6 +423,25 @@ class AtomicData(torch_geometric.data.Data):
             else torch.zeros(num_atoms, 1, dtype=torch.get_default_dtype())
         )
 
+        hessian_np = config.properties.get("hessian")
+        hessian = (
+            torch.tensor(hessian_np, dtype=torch.get_default_dtype()).reshape(-1)
+            if hessian_np is not None
+            else torch.zeros(0, dtype=torch.get_default_dtype())
+        )
+        has_hessian = torch.tensor(hessian_np is not None)
+        hessian_weight = (
+            torch.tensor(
+                config.property_weights.get("hessian"), dtype=torch.get_default_dtype()
+            )
+            if config.property_weights.get("hessian") is not None
+            else torch.tensor(1.0, dtype=torch.get_default_dtype())
+        )
+        sqrt_masses = torch.tensor(
+            np.sqrt(ase.data.atomic_masses[np.asarray(config.atomic_numbers)]),
+            dtype=torch.get_default_dtype(),
+        )
+
         cls_kwargs = dict(
             edge_index=torch.tensor(edge_index, dtype=torch.long),
             positions=positions,
@@ -428,6 +474,10 @@ class AtomicData(torch_geometric.data.Data):
             volume=volume,
             fermi_level=fermi_level,
             external_field=external_field,
+            hessian=hessian,
+            hessian_weight=hessian_weight,
+            has_hessian=has_hessian,
+            sqrt_masses=sqrt_masses,
         )
 
         # Pass through any extra properties not already handled above.

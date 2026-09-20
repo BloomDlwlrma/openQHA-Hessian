@@ -15,6 +15,7 @@ class DefaultKeys(Enum):
     TOTAL_CHARGE = "total_charge"
     TOTAL_SPIN = "total_spin"
     ELEC_TEMP = "elec_temp"
+    HESSIAN = "REF_hessian"  # per-structure Cartesian Hessian, (3N x 3N) flattened row-major in info
 
     @staticmethod
     def keydict() -> dict[str, str]:

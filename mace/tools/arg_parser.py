@@ -670,6 +670,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=DefaultKeys.FORCES.value,
     )
     parser.add_argument(
+        "--hessian_key",
+        help="Key of reference Hessians in training xyz (info, (3N x 3N) flattened; a structure without it has no Hessian label)",
+        type=str,
+        default=DefaultKeys.HESSIAN.value,
+    )
+    parser.add_argument(
         "--virials_key",
         help="Key of reference virials in training xyz",
         type=str,
@@ -1186,6 +1192,12 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Key of reference forces in training xyz",
         type=str,
         default=DefaultKeys.FORCES.value,
+    )
+    parser.add_argument(
+        "--hessian_key",
+        help="Key of reference Hessians in training xyz (info, (3N x 3N) flattened; a structure without it has no Hessian label)",
+        type=str,
+        default=DefaultKeys.HESSIAN.value,
     )
     parser.add_argument(
         "--virials_key",

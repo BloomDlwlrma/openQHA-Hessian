@@ -60,6 +60,7 @@ def update_keyspec_from_kwargs(
         "total_charge_key",
         "polarizability_key",
         "total_spin_key",
+        "hessian_key",
     ]
     arrays = ["forces_key", "charges_key"]
     info_keys = {}
@@ -204,6 +205,20 @@ def config_from_atoms(
         if not atoms_key in atoms.arrays:
             property_weights[name] = 0.0
 
+    # A per-structure Hessian label: (3N x 3N) flattened row-major under the info key,
+    # or absent; `has_hessian = False` in info declares it absent even if the key is
+    # there. Present -> validated as a (3N, 3N) symmetric array; absent -> None with
+    # weight 0, so a loss can mask the structure.
+    if "hessian" in properties:
+        hessian = properties["hessian"]
+        if hessian is not None and not bool(atoms.info.get("has_hessian", True)):
+            hessian = None
+        if hessian is None:
+            properties["hessian"] = None
+            property_weights["hessian"] = 0.0
+        else:
+            properties["hessian"] = _validated_hessian(hessian, len(atoms), atoms.info)
+
     return Configuration(
         atomic_numbers=atomic_numbers,
         positions=atoms.get_positions(),
@@ -215,6 +230,27 @@ def config_from_atoms(
         pbc=pbc,
         cell=cell,
     )
+
+
+def _validated_hessian(hessian, num_atoms: int, info: dict) -> np.ndarray:
+    """A flattened (3N x 3N) Hessian as a symmetric (3N, 3N) array; refuses a wrong
+    length or an asymmetry above 1e-6 (relative to the largest element), naming the
+    structure by whatever identity keys its info carries."""
+    n3 = 3 * num_atoms
+    h = np.asarray(hessian, dtype=float).reshape(-1)
+    ident = {k: info[k] for k in ("qm9_index", "generator", "basin", "k", "config_type") if k in info}
+    if h.size != n3 * n3:
+        raise ValueError(
+            f"hessian of structure {ident} has {h.size} numbers, not (3N)^2 = {n3 * n3}"
+        )
+    h = h.reshape(n3, n3)
+    scale = max(float(np.abs(h).max()), 1e-300)
+    asym = float(np.abs(h - h.T).max()) / scale
+    if asym > 1e-6:
+        raise ValueError(
+            f"hessian of structure {ident} is not symmetric (max |H - H^T| / max |H| = {asym:.2e})"
+        )
+    return 0.5 * (h + h.T)
 
 
 def test_config_types(
