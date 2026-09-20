@@ -40,4 +40,3 @@ dist/
 *.png
 /scripts
 *.cube
-mace/calculators/foundations_models/*.model
