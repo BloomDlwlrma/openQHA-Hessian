@@ -5,6 +5,7 @@
 ###########################################################################################
 
 import argparse
+import importlib
 import ast
 import dataclasses
 import json
@@ -656,12 +657,32 @@ def get_avg_num_neighbors(head_configs, args, train_loader, device):
     return avg_num_neighbors_out
 
 
+def load_external_loss(args: argparse.Namespace) -> torch.nn.Module:
+    """`--loss external --loss_module package.module:factory`: import the module and
+    call the factory with the parsed args. The factory returns any `nn.Module` whose
+    `forward(ref, pred)` is the loss; it may expose `wants_hessian_at_eval` (the model is
+    then asked for the full Hessian during evaluation) and weight buffers that Stage Two
+    swaps. Nothing about the loss itself lives in mace."""
+    spec = getattr(args, "loss_module", None)
+    if not spec:
+        raise ValueError("--loss external needs --loss_module package.module:factory")
+    module_name, _, factory_name = spec.partition(":")
+    module = importlib.import_module(module_name)
+    factory = getattr(module, factory_name or "build")
+    loss_fn = factory(args)
+    if not isinstance(loss_fn, torch.nn.Module):
+        raise TypeError(f"{spec} returned {type(loss_fn).__name__}, not a torch.nn.Module")
+    return loss_fn
+
+
 def get_loss_fn(
     args: argparse.Namespace,
     dipole_only: bool,
     compute_dipole: bool,
 ) -> torch.nn.Module:
-    if args.loss == "weighted":
+    if args.loss == "external":
+        loss_fn = load_external_loss(args)
+    elif args.loss == "weighted":
         loss_fn = modules.WeightedEnergyForcesLoss(
             energy_weight=args.energy_weight, forces_weight=args.forces_weight
         )
@@ -741,7 +762,20 @@ def get_swa(
             swas[-1] = False
     if args.loss == "forces_only":
         raise ValueError("Can not select Stage Two with forces only loss.")
-    if args.loss == "virials":
+    if args.loss == "external":
+        # The external loss builds itself again from the Stage Two weights: the factory
+        # sees the same args with `energy_weight` / `forces_weight` / `hessian_weight`
+        # replaced by their `swa_` values, so a loss needs no Stage Two code of its own.
+        stage_two_args = argparse.Namespace(**vars(args))
+        for name in ("energy_weight", "forces_weight", "hessian_weight", "stress_weight", "virials_weight"):
+            swa_value = getattr(args, "swa_" + name, None)
+            if swa_value is not None:
+                setattr(stage_two_args, name, swa_value)
+        loss_fn_energy = load_external_loss(stage_two_args)
+        logging.info(
+            f"Stage Two (after {args.start_swa} epochs) with loss function: {loss_fn_energy} and learning rate : {args.swa_lr}"
+        )
+    elif args.loss == "virials":
         loss_fn_energy = modules.WeightedEnergyForcesVirialsLoss(
             energy_weight=args.swa_energy_weight,
             forces_weight=args.swa_forces_weight,

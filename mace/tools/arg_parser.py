@@ -776,7 +776,47 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
             "universal",
             "energy_forces_dipole",
             "l1l2energyforces",
+            "external",
         ],
+    )
+    parser.add_argument(
+        "--loss_module",
+        help='with --loss external: "package.module:factory" (factory default "build"), called with the parsed args and returning the loss nn.Module',
+        type=str,
+        default=None,
+    )
+    parser.add_argument(
+        "--hessian_weight",
+        help="weight of a Hessian term (read by an external loss)",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--swa_hessian_weight",
+        "--stage_two_hessian_weight",
+        help="weight of a Hessian term after starting Stage Two (read by an external loss)",
+        type=float,
+        default=1.0,
+    )
+    parser.add_argument(
+        "--n_hessian_probes",
+        help="number of stochastic probes per structure for a Hessian-vector-product loss",
+        type=int,
+        default=4,
+    )
+    parser.add_argument(
+        "--hessian_probe",
+        help="probe set of a Hessian-vector-product loss",
+        type=str,
+        default="rademacher",
+        choices=["rademacher", "gaussian", "modes", "cartesian"],
+    )
+    parser.add_argument(
+        "--hessian_mode_weighting",
+        help="per-mode weighting of a Hessian loss (read by an external loss)",
+        type=str,
+        default="entropy",
+        choices=["entropy", "none"],
     )
     parser.add_argument(
         "--forces_weight", help="weight of forces loss", type=float, default=100.0

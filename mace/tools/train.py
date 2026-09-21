@@ -577,6 +577,11 @@ def evaluate(
                 compute_force=output_args["forces"],
                 compute_virials=output_args["virials"],
                 compute_stress=output_args["stress"],
+                # A loss that declares `wants_hessian_at_eval` is given the full
+                # 3N x 3N Hessian here (mace's own `compute_hessians_vmap`, no graph
+                # kept), so that a validation number is exact where a training one is
+                # estimated. Off by default: nothing else pays for it.
+                compute_hessian=output_args.get("hessian", False),
             )
             avg_loss, aux = metrics(batch, output)
     avg_loss, aux = metrics.compute()

@@ -753,6 +753,7 @@ def run(args) -> None:
 
     # Model
     model, output_args = configure_model(args, train_loader, atomic_energies, model_foundation, heads, z_table, head_configs)
+    output_args["hessian"] = bool(getattr(loss_fn, "wants_hessian_at_eval", False))
     model.to(device)
 
     if args.lora:
