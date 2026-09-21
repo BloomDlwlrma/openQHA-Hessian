@@ -567,24 +567,42 @@ def evaluate(
 
     start_time = time.time()
 
-    with preserve_grad_state(model):
-        for batch in data_loader:
-            batch = batch.to(device)
-            batch_dict = batch.to_dict()
-            output = model(
-                batch_dict,
-                training=False,
-                compute_force=output_args["forces"],
-                compute_virials=output_args["virials"],
-                compute_stress=output_args["stress"],
-                # A loss that declares `wants_hessian_at_eval` is given the full
-                # 3N x 3N Hessian here (mace's own `compute_hessians_vmap`, no graph
-                # kept), so that a validation number is exact where a training one is
-                # estimated. Off by default: nothing else pays for it.
-                compute_hessian=output_args.get("hessian", False),
-            )
-            avg_loss, aux = metrics(batch, output)
-    avg_loss, aux = metrics.compute()
+    # The loss is in eval mode for the duration (nn.Module semantics: a loss that
+    # behaves differently at validation -- fixed probes, a summary -- reads
+    # `self.training`); mace's own losses are indifferent to it (openQHA commit C).
+    loss_was_training = bool(getattr(loss_fn, "training", True))
+    loss_fn.eval()
+    try:
+        with preserve_grad_state(model):
+            for batch in data_loader:
+                batch = batch.to(device)
+                batch_dict = batch.to_dict()
+                output = model(
+                    batch_dict,
+                    # `force_graph`: a loss that takes Hessian-vector products at
+                    # evaluation needs the forces to carry their graph, which is what
+                    # the model's `training` flag controls (create_graph). Off by default.
+                    training=bool(output_args.get("force_graph", False)),
+                    compute_force=output_args["forces"],
+                    compute_virials=output_args["virials"],
+                    compute_stress=output_args["stress"],
+                    # A loss that declares `wants_hessian_at_eval` is given the full
+                    # 3N x 3N Hessian here (mace's own `compute_hessians_vmap`, no graph
+                    # kept), so that a validation number is exact where a training one is
+                    # estimated. Off by default: nothing else pays for it.
+                    compute_hessian=output_args.get("hessian", False),
+                )
+                avg_loss, aux = metrics(batch, output)
+        avg_loss, aux = metrics.compute()
+        # A loss may summarise its own terms over the pass (`eval_summary()` returns a
+        # dict and resets); the entries join the metrics mace logs to results/*.txt.
+        summary = getattr(loss_fn, "eval_summary", None)
+        if callable(summary):
+            extra = summary()
+            if extra:
+                aux.update(extra)
+    finally:
+        loss_fn.train(loss_was_training)
     aux["time"] = time.time() - start_time
     metrics.reset()
 

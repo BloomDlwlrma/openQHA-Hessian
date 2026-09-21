@@ -380,7 +380,14 @@ def run(args) -> None:
         logging.info(
             "==================Using multiheads finetuning mode=================="
         )
-        args.loss = "universal"
+        # An external loss (`--loss external`) is kept: the universal loss is the
+        # multihead default, not a requirement of the mode (openQHA ticket 18, commit C).
+        if args.loss != "external":
+            args.loss = "universal"
+        else:
+            logging.info(
+                "Multiheads finetuning with the external loss (--loss external); the universal loss is not substituted"
+            )
 
         all_ase_readable = all(
             all(check_path_ase_read(f) for f in head_config.train_file)
@@ -754,6 +761,9 @@ def run(args) -> None:
     # Model
     model, output_args = configure_model(args, train_loader, atomic_energies, model_foundation, heads, z_table, head_configs)
     output_args["hessian"] = bool(getattr(loss_fn, "wants_hessian_at_eval", False))
+    # A loss that takes Hessian-vector products at evaluation needs the force graph
+    # kept (the model called as in training); off by default (openQHA commit C).
+    output_args["force_graph"] = bool(getattr(loss_fn, "wants_force_graph_at_eval", False))
     model.to(device)
 
     if args.lora:

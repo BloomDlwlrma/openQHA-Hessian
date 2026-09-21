@@ -813,10 +813,10 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--hessian_mode_weighting",
-        help="per-mode weighting of a Hessian loss (read by an external loss)",
+        help="per-mode weighting of a Hessian loss (read by an external loss); cartesian = the raw Cartesian matrix, no projection",
         type=str,
-        default="entropy",
-        choices=["entropy", "none"],
+        default="cartesian",
+        choices=["cartesian", "entropy", "none"],
     )
     parser.add_argument(
         "--forces_weight", help="weight of forces loss", type=float, default=100.0
