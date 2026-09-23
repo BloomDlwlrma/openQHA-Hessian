@@ -814,7 +814,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         "--hessian_probe",
         help="probe set of a Hessian-vector-product loss",
         type=str,
-        default="rademacher",
+        default="gaussian",
         choices=["rademacher", "gaussian", "cartesian"],
     )
     parser.add_argument(

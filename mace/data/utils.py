@@ -249,8 +249,9 @@ def config_from_atoms(
 
 def _validated_probes(probes, num_atoms: int, info: dict) -> np.ndarray:
     """(k, 3N) fixed probes, flattened row-major in info. The length must be a multiple of
-    3N -- k is whatever the dataset stored -- and, because the openQHA loss estimates a
-    Frobenius norm with unit-variance probes, the entries must be +-1 (Rademacher)."""
+    3N -- k is whatever the dataset stored -- and every entry must be finite. The
+    DISTRIBUTION is the dataset's business (openQHA S0-C-68 draws PHL's standard normal;
+    a Rademacher set is equally valid here), so nothing about it is checked."""
     v = np.asarray(probes, dtype=float).reshape(-1)
     n3 = 3 * num_atoms
     ident = info.get("qm9_index", info.get("frame", "?"))
@@ -258,9 +259,9 @@ def _validated_probes(probes, num_atoms: int, info: dict) -> np.ndarray:
         raise ValueError(
             f"valid_probes of structure {ident} has {v.size} numbers, not a multiple of 3N = {n3}"
         )
-    if not np.all(np.isin(v, (-1.0, 1.0))):
+    if not np.all(np.isfinite(v)):
         raise ValueError(
-            f"valid_probes of structure {ident} is not a Rademacher draw (entries other than +-1)"
+            f"valid_probes of structure {ident} holds a non-finite number"
         )
     return v.reshape(-1, n3)
 

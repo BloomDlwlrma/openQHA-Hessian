@@ -3,8 +3,9 @@
 them (openQHA-Hessian, branch openqha-hessian, commit D).
 
 The probes are DRAWN BY THE DATASET, not here (openQHA S0-C-67): a structure that carries
-none gets None with weight 0, and a loss that wants them must say so itself. Nothing in
-this file draws a random vector.
+none gets None with weight 0, and a loss that wants them must say so itself. Their
+DISTRIBUTION is the dataset's business too (openQHA draws PHL's standard normal, S0-C-68),
+so the validation here checks the shape and that the numbers are finite, nothing else.
 """
 
 import numpy as np
@@ -22,7 +23,7 @@ TABLE = tools.AtomicNumberTable([1, 6, 8])
 K_MAX = 16
 
 
-def _atoms(n_atoms, seed, with_probes=True, k=K_MAX, length_ok=True, rademacher=True, declared=None):
+def _atoms(n_atoms, seed, with_probes=True, k=K_MAX, length_ok=True, finite=True, declared=None):
     rng = np.random.default_rng(seed)
     symbols = ["C", "O", "H", "H", "H", "C", "H", "H"][:n_atoms]
     at = Atoms(symbols=symbols, positions=rng.standard_normal((n_atoms, 3)) * 1.3)
@@ -30,9 +31,9 @@ def _atoms(n_atoms, seed, with_probes=True, k=K_MAX, length_ok=True, rademacher=
     at.arrays["REF_forces"] = rng.standard_normal((n_atoms, 3))
     if with_probes:
         n3 = 3 * n_atoms
-        v = rng.choice([-1.0, 1.0], size=(k, n3))
-        if not rademacher:
-            v = rng.standard_normal((k, n3))
+        v = rng.standard_normal((k, n3))           # openQHA S0-C-68 draws PHL's normal
+        if not finite:
+            v[0, 0] = np.nan
         flat = v.reshape(-1) if length_ok else v.reshape(-1)[:-1]
         at.info["REF_valid_probes"] = flat
         at.info["_V"] = v
@@ -69,8 +70,8 @@ def test_config_from_atoms_reads_validates_and_masks():
 
     with pytest.raises(ValueError, match="not a multiple of 3N"):
         data.config_from_atoms(_atoms(3, 4, length_ok=False), key_specification=ks)
-    with pytest.raises(ValueError, match="not a Rademacher draw"):
-        data.config_from_atoms(_atoms(3, 5, rademacher=False), key_specification=ks)
+    with pytest.raises(ValueError, match="non-finite"):
+        data.config_from_atoms(_atoms(3, 5, finite=False), key_specification=ks)
 
 
 def test_atomic_data_fields_and_batching():

@@ -91,7 +91,7 @@ def test_flags_and_defaults():
     args = _args()
     assert args.loss_module is None
     assert (args.hessian_weight, args.n_hessian_probes) == (1.0, 4)
-    assert args.hessian_probe == "rademacher"
+    assert args.hessian_probe == "gaussian"          # PHL's Algorithm 1 (openQHA S0-C-68)
     assert args.swa_hessian_weight == 1.0
     assert not hasattr(args, "hessian_mode_weighting")      # commit D: there is one target
     args = _args(loss="external", loss_module="m:f", hessian_weight=7.5, n_hessian_probes=2,
