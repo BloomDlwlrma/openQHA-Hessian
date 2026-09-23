@@ -16,6 +16,7 @@ class DefaultKeys(Enum):
     TOTAL_SPIN = "total_spin"
     ELEC_TEMP = "elec_temp"
     HESSIAN = "REF_hessian"  # per-structure Cartesian Hessian, (3N x 3N) flattened row-major in info
+    VALID_PROBES = "REF_valid_probes"  # per-structure fixed probe set, (k x 3N) flattened row-major in info
 
     @staticmethod
     def keydict() -> dict[str, str]:

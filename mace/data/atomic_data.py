@@ -59,6 +59,8 @@ class AtomicData(torch_geometric.data.Data):
     hessian: torch.Tensor  # [9 N^2] flattened row-major (3N x 3N), empty when absent
     hessian_weight: torch.Tensor  # [,]
     has_hessian: torch.Tensor  # [,] bool
+    valid_probes: torch.Tensor  # [k * 3N] flattened row-major (k x 3N), empty when absent
+    has_valid_probes: torch.Tensor  # [,] bool
     sqrt_masses: torch.Tensor  # [n_nodes] amu^1/2
 
     def __init__(
@@ -97,6 +99,8 @@ class AtomicData(torch_geometric.data.Data):
         hessian: Optional[torch.Tensor] = None,  # [9 n_nodes^2] or [0]
         hessian_weight: Optional[torch.Tensor] = None,  # [,]
         has_hessian: Optional[torch.Tensor] = None,  # [,] bool
+        valid_probes: Optional[torch.Tensor] = None,  # [k * 3 n_nodes] or [0]
+        has_valid_probes: Optional[torch.Tensor] = None,  # [,] bool
         sqrt_masses: Optional[torch.Tensor] = None,  # [n_nodes]
         **extra_data: torch.Tensor,
     ):
@@ -114,6 +118,16 @@ class AtomicData(torch_geometric.data.Data):
         assert len(hessian.shape) == 1 and hessian.numel() in (0, 9 * num_nodes * num_nodes)
         assert len(has_hessian.shape) == 0 and has_hessian.dtype == torch.bool
         assert len(hessian_weight.shape) == 0
+        # The stored probe set rides along the same way; a loss slices graph k's block
+        # by cumsum(k * 3 n_k) over the graphs with `has_valid_probes`.
+        if valid_probes is None:
+            valid_probes = torch.zeros(0, dtype=positions.dtype)
+        if has_valid_probes is None:
+            has_valid_probes = torch.tensor(valid_probes.numel() > 0)
+        assert len(valid_probes.shape) == 1 and (
+            valid_probes.numel() == 0 or valid_probes.numel() % (3 * num_nodes) == 0
+        )
+        assert len(has_valid_probes.shape) == 0 and has_valid_probes.dtype == torch.bool
         assert sqrt_masses is None or sqrt_masses.shape == (num_nodes,)
 
         assert edge_index.shape[0] == 2 and len(edge_index.shape) == 2
@@ -186,6 +200,8 @@ class AtomicData(torch_geometric.data.Data):
             "hessian": hessian,
             "hessian_weight": hessian_weight,
             "has_hessian": has_hessian,
+            "valid_probes": valid_probes,
+            "has_valid_probes": has_valid_probes,
             "sqrt_masses": sqrt_masses,
         }
         data.update(extra_data)
@@ -437,6 +453,13 @@ class AtomicData(torch_geometric.data.Data):
             if config.property_weights.get("hessian") is not None
             else torch.tensor(1.0, dtype=torch.get_default_dtype())
         )
+        probes_np = config.properties.get("valid_probes")
+        valid_probes = (
+            torch.tensor(probes_np, dtype=torch.get_default_dtype()).reshape(-1)
+            if probes_np is not None
+            else torch.zeros(0, dtype=torch.get_default_dtype())
+        )
+        has_valid_probes = torch.tensor(probes_np is not None)
         sqrt_masses = torch.tensor(
             np.sqrt(ase.data.atomic_masses[np.asarray(config.atomic_numbers)]),
             dtype=torch.get_default_dtype(),
@@ -477,6 +500,8 @@ class AtomicData(torch_geometric.data.Data):
             hessian=hessian,
             hessian_weight=hessian_weight,
             has_hessian=has_hessian,
+            valid_probes=valid_probes,
+            has_valid_probes=has_valid_probes,
             sqrt_masses=sqrt_masses,
         )
 

@@ -38,7 +38,6 @@ class FakeExternalLoss(torch.nn.Module):
         self.hessian_weight = float(args.hessian_weight)
         self.n_probes = int(args.n_hessian_probes)
         self.probe = args.hessian_probe
-        self.mode_weighting = args.hessian_mode_weighting
         self.saw_hessian = []
         self.saw_training_mode = []
         self.n_summaries = 0
@@ -92,25 +91,27 @@ def test_flags_and_defaults():
     args = _args()
     assert args.loss_module is None
     assert (args.hessian_weight, args.n_hessian_probes) == (1.0, 4)
-    assert (args.hessian_probe, args.hessian_mode_weighting) == ("rademacher", "cartesian")
+    assert args.hessian_probe == "rademacher"
     assert args.swa_hessian_weight == 1.0
+    assert not hasattr(args, "hessian_mode_weighting")      # commit D: there is one target
     args = _args(loss="external", loss_module="m:f", hessian_weight=7.5, n_hessian_probes=2,
-                 hessian_probe="modes", hessian_mode_weighting="none")
+                 hessian_probe="cartesian")
     assert args.loss == "external" and args.loss_module == "m:f"
     assert (args.hessian_weight, args.n_hessian_probes) == (7.5, 2)
-    assert (args.hessian_probe, args.hessian_mode_weighting) == ("modes", "none")
-    with pytest.raises(SystemExit):
-        _args(hessian_probe="hutchinson")
+    assert args.hessian_probe == "cartesian"
+    for gone in ("hutchinson", "modes"):                    # "modes" went with the projected target
+        with pytest.raises(SystemExit):
+            _args(hessian_probe=gone)
 
 
 def test_get_loss_fn_calls_the_factory_with_the_args():
     CALLS.clear()
     args = _args(loss="external", loss_module=f"{__name__}:build", hessian_weight=3.0,
-                 n_hessian_probes=2, hessian_probe="modes", forces_weight=100.0)
+                 n_hessian_probes=2, hessian_probe="gaussian", forces_weight=100.0)
     loss_fn = get_loss_fn(args, dipole_only=False, compute_dipole=False)
     assert isinstance(loss_fn, FakeExternalLoss)
     assert len(CALLS) == 1 and CALLS[0] is args
-    assert (loss_fn.hessian_weight, loss_fn.n_probes, loss_fn.probe) == (3.0, 2, "modes")
+    assert (loss_fn.hessian_weight, loss_fn.n_probes, loss_fn.probe) == (3.0, 2, "gaussian")
     assert loss_fn.forces_weight == 100.0
     assert "hessian_weight=3.000" in repr(loss_fn)
 

@@ -676,6 +676,12 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         default=DefaultKeys.HESSIAN.value,
     )
     parser.add_argument(
+        "--valid_probes_key",
+        help="Key of the per-structure fixed probe set in training xyz (info, (k x 3N) flattened; read by an external loss at evaluation, absent = no stored probes)",
+        type=str,
+        default=DefaultKeys.VALID_PROBES.value,
+    )
+    parser.add_argument(
         "--virials_key",
         help="Key of reference virials in training xyz",
         type=str,
@@ -809,14 +815,7 @@ def build_default_arg_parser() -> argparse.ArgumentParser:
         help="probe set of a Hessian-vector-product loss",
         type=str,
         default="rademacher",
-        choices=["rademacher", "gaussian", "modes", "cartesian"],
-    )
-    parser.add_argument(
-        "--hessian_mode_weighting",
-        help="per-mode weighting of a Hessian loss (read by an external loss); cartesian = the raw Cartesian matrix, no projection",
-        type=str,
-        default="cartesian",
-        choices=["cartesian", "entropy", "none"],
+        choices=["rademacher", "gaussian", "cartesian"],
     )
     parser.add_argument(
         "--forces_weight", help="weight of forces loss", type=float, default=100.0
@@ -1238,6 +1237,12 @@ def build_preprocess_arg_parser() -> argparse.ArgumentParser:
         help="Key of reference Hessians in training xyz (info, (3N x 3N) flattened; a structure without it has no Hessian label)",
         type=str,
         default=DefaultKeys.HESSIAN.value,
+    )
+    parser.add_argument(
+        "--valid_probes_key",
+        help="Key of the per-structure fixed probe set in training xyz (info, (k x 3N) flattened; read by an external loss at evaluation, absent = no stored probes)",
+        type=str,
+        default=DefaultKeys.VALID_PROBES.value,
     )
     parser.add_argument(
         "--virials_key",

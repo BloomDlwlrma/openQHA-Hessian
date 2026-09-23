@@ -61,6 +61,7 @@ def update_keyspec_from_kwargs(
         "polarizability_key",
         "total_spin_key",
         "hessian_key",
+        "valid_probes_key",
     ]
     arrays = ["forces_key", "charges_key"]
     info_keys = {}
@@ -219,6 +220,20 @@ def config_from_atoms(
         else:
             properties["hessian"] = _validated_hessian(hessian, len(atoms), atoms.info)
 
+    # The fixed probe set of a structure used at EVALUATION by an external loss
+    # (openQHA S0-C-67): (k x 3N) flattened row-major under the info key, drawn once
+    # when the dataset was built. Absent -> None with weight 0; present -> validated.
+    # Nothing is drawn here: a loss that wants probes and finds none must say so.
+    if "valid_probes" in properties:
+        probes = properties["valid_probes"]
+        if probes is not None and not bool(atoms.info.get("has_valid_probes", True)):
+            probes = None
+        if probes is None:
+            properties["valid_probes"] = None
+            property_weights["valid_probes"] = 0.0
+        else:
+            properties["valid_probes"] = _validated_probes(probes, len(atoms), atoms.info)
+
     return Configuration(
         atomic_numbers=atomic_numbers,
         positions=atoms.get_positions(),
@@ -230,6 +245,24 @@ def config_from_atoms(
         pbc=pbc,
         cell=cell,
     )
+
+
+def _validated_probes(probes, num_atoms: int, info: dict) -> np.ndarray:
+    """(k, 3N) fixed probes, flattened row-major in info. The length must be a multiple of
+    3N -- k is whatever the dataset stored -- and, because the openQHA loss estimates a
+    Frobenius norm with unit-variance probes, the entries must be +-1 (Rademacher)."""
+    v = np.asarray(probes, dtype=float).reshape(-1)
+    n3 = 3 * num_atoms
+    ident = info.get("qm9_index", info.get("frame", "?"))
+    if v.size == 0 or v.size % n3 != 0:
+        raise ValueError(
+            f"valid_probes of structure {ident} has {v.size} numbers, not a multiple of 3N = {n3}"
+        )
+    if not np.all(np.isin(v, (-1.0, 1.0))):
+        raise ValueError(
+            f"valid_probes of structure {ident} is not a Rademacher draw (entries other than +-1)"
+        )
+    return v.reshape(-1, n3)
 
 
 def _validated_hessian(hessian, num_atoms: int, info: dict) -> np.ndarray:
