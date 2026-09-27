@@ -15,10 +15,10 @@ H_theta gives 0.19^2 ||H_theta||_F^2/(9N^2) with a non-zero one; a `hessian` fie
 wrong length is refused; the Rademacher estimator with k = 4 over 400 seeds has its mean
 within 3 sigma of the exact loss and the variance Derivation 2.2 gives.
 
-Algorithm 1 (ticket 35): `FrameConstants` is the Label, nu = 9 N^2 and the frame's seed --
-no masses, no positions, no projector, no reference modes; the cache key is the Label's
-bytes alone. Algorithm 4 (S0-C-55): in eval mode the Hessian term is the same on two
-calls (1e-12, the frame's fixed probes), is the same under another mace seed, differs
+Algorithm 1 (ticket 35): `FrameConstants` is the Label and nu = 9 N^2 -- three slots, no
+seed, no masses, no positions, no projector, no reference modes; built per call and keyed
+by nothing (S0-C-67). Algorithm 4 (S0-C-55): in eval mode the Hessian term is the same on
+two calls (1e-12, the frame's fixed probes), is the same under another mace seed, differs
 between frames, and differs from a training call's fresh draw; `eval_summary()` averages
 the three terms over the pass and resets; `wants_hessian_at_eval` is False and
 `wants_force_graph_at_eval` True. `build(args)` refuses a target that no longer exists.
