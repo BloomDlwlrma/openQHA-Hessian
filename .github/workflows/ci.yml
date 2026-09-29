@@ -1,0 +1,27 @@
+# The public install path on a clean machine (spec-repo-swap.md, decision 9):
+# install.sh in URL mode, then the two tests that need nothing from the private
+# openQHA checkout. The full suite stays local / Tianhe.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  install-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the package
+        uses: actions/checkout@v7
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Install the mace fork and the package (install.sh, URL mode)
+        run: bash install.sh
+      - name: Hessian-vector product on a toy potential (t_hvp)
+        run: python tests/unit/t_hvp.py
+      - name: PHL loss on a toy potential (t_phl_loss)
+        run: python tests/unit/t_phl_loss.py
