@@ -1,6 +1,6 @@
 # openqha-hessian
 
-The training side of openQHA, as a package: the projected Hessian loss (PHL) that
+The training side of openQHA, as a package: the Projected Hessian Learning (PHL) loss that
 fine-tunes MACE-OFF23 on reference E-F-H labels (the Hessian-vector product, the probes,
 the loss). It imports the openQHA checkout (`openqha.{data,store,thermochem,potentials}`)
 and the mace fork.
@@ -118,10 +118,7 @@ python -c "from openqha.potentials.engine import mace_fork_info; print(mace_fork
 
 ## Citation
 
-If you use this package -- openQHA-Hessian, the MACE-side implementation of PHL in this
-repository -- please cite the software it trains against:
-
-If you use openQHA, openQHA-Hessian in your work, please cite it:
+If you use openQHA or openQHA-Hessian in your work, please cite it:
 
 ```bibtex
 @misc{openqha,
