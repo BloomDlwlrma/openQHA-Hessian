@@ -5,7 +5,8 @@ Asserted: `mace_argv` names the external loss and the Dataset's keys, float64 an
 foundation's E0s, and carries the probe settings; `--multiheads` adds the replay flags
 and nothing else does; `split_files` splits the merged Dataset file by its `split` key
 and counts the Hessians; `check_fork` refuses a non-fork and a dirty checkout with a
-message naming the fix; the Record's schema covers every key `run_training` writes and
+message naming the fix, and diagnoses a `mace/` subdirectory of the working directory
+as a shadow of the install; the Record's schema covers every key `run_training` writes and
 `parse_results` / `parse_epochs` read mace's two output forms; `registry_entry` names
 the index and the config SHA.
 
@@ -23,6 +24,7 @@ arithmetic); the target defaults to cartesian; `parse_results` / `parse_epochs` 
 the three validation curves and `parse_stage_two_epoch` the switch; `curve_moved` tells
 a flat Hessian curve from a moving one.
 """
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -137,12 +139,32 @@ def main():
     real = engine.mace_fork_info
     try:
         engine.mace_fork_info = lambda: dict(mace_fork_commit="unknown", mace_fork_dirty=None, mace_fork_path=None)
-        try:
-            train_run.check_fork(strict=True)
-            check("a non-fork mace is refused, naming the install line", False)
-        except RuntimeError as exc:
-            check("a non-fork mace is refused, naming the install line",
-                  "pip install -e" in str(exc) and engine.MACE_FORK in str(exc), str(exc))
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as td:
+            shadowed, plain = Path(td) / "shadowed", Path(td) / "plain"
+            shadowed.mkdir()
+            (shadowed / "mace").mkdir()          # a mace/ subdirectory shadows the editable install
+            plain.mkdir()
+            shadow_msg = plain_msg = "<no refusal>"
+            try:
+                os.chdir(str(shadowed))
+                try:
+                    train_run.check_fork(strict=True)
+                except RuntimeError as exc:
+                    shadow_msg = str(exc)
+                os.chdir(str(plain))
+                try:
+                    train_run.check_fork(strict=True)
+                except RuntimeError as exc:
+                    plain_msg = str(exc)
+            finally:
+                os.chdir(cwd)
+        check("a non-fork mace is refused, naming the install script and the fork identity",
+              "pip install -e" in shadow_msg and "install.sh" in shadow_msg and engine.MACE_FORK in shadow_msg,
+              shadow_msg)
+        check("the shadow note appears with a mace/ subdirectory of the working directory, and not without",
+              "cd into a repository root" in shadow_msg and "cd into a repository root" not in plain_msg,
+              (shadow_msg[-140:], plain_msg[-140:]))
         check("... unless strict is off", train_run.check_fork(strict=False)["mace_fork_commit"] == "unknown")
         engine.mace_fork_info = lambda: dict(mace_fork_commit="a" * 40, mace_fork_dirty=True, mace_fork_path="/w/fork")
         try:

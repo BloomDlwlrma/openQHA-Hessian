@@ -35,8 +35,8 @@ from _testlib import openqha_src                                # noqa: E402
 ROOT = openqha_src()
 FIX = ROOT / "tests" / "data" / "methyloxirane_frames"
 LEVEL = "wb97m-d3bj_def2-tzvppd"
-#: the fork's commit B (the external-loss hook); commit C is what ticket 18 adds after it
-FORK_COMMIT_B = "e68390fca2b9c055609726f8d0897cc90a4ee08d"
+#: the fork's commit B (the external-loss hook) in the rebuilt history; commit C follows it
+FORK_COMMIT_B = "61582b0efb61cc251457c52367bb8239fe1cb2b5"
 FAIL = []
 
 

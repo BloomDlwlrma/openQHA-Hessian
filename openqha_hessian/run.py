@@ -211,10 +211,14 @@ def check_fork(strict=True):
     info["mace_version"] = mace.__version__
     if strict:
         if info["mace_fork_commit"] == "unknown":
+            shadow = ""
+            if (Path.cwd() / "mace").is_dir():
+                shadow = ("\n  note: a mace/ subdirectory of the working directory shadows the editable "
+                          "install -- cd into a repository root and retry")
             raise RuntimeError(
                 "the installed mace at {} is not a git checkout: the Hessian loss needs the fork {} "
-                "(pip uninstall -y mace-torch && pip install -e <path>/openQHA-Hessian)".format(
-                    getattr(mace, "__file__", "?"), engine.MACE_FORK))
+                "(pip uninstall -y mace-torch && bash <path>/openQHA-Hessian/install.sh, or "
+                "pip install -e <path>/mace)".format(getattr(mace, "__file__", "?"), engine.MACE_FORK) + shadow)
         if info["mace_fork_dirty"]:
             raise RuntimeError(
                 "the mace checkout at {} has uncommitted changes to tracked files; commit them so the "
