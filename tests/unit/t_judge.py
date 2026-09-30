@@ -1,4 +1,4 @@
-"""Ticket 14 of the Hessian-learning set: the judge's arithmetic, its set-aside rule and
+"""The judge's arithmetic, its set-aside rule and
 its verdict lines -- no engine (a fake calculator answers with stored Hessians).
 
 Asserted: a per-frame row reproduces `hessian_compare`'s numbers and the training target
@@ -10,7 +10,7 @@ one, and sets aside a 40 cm^-1 mode whose FD self-check is 7 cm^-1; a verdict li
 nothing to measure is `-` and never a silent PASS; the must-pass and must-fail lines
 behave; `forgetting` compares two calculators on a frame file; the Record round-trips.
 
-Ticket 22 (gate rows and reference rows): `rms_bin` at the edges; `aggregate_displacement`
+Gate rows and reference rows: `rms_bin` at the edges; `aggregate_displacement`
 groups by (distribution, bin) with H over the Hessian frames and E/F over all; the
 verdict carries GATE yes / no, `verdict_of` reads gate rows only (worsening a reference
 row -- the low-mode line, the held-out Hessian line, the ramp -- changes nothing;
@@ -214,7 +214,7 @@ def main():
         check("judge.out and judge.dat are written",
               (Path(td) / "judge.out").is_file() and (Path(td) / "judge.dat").is_file())
 
-    # ================================================================== ticket 22
+    # =========================================================== gate rows / reference rows
     check("rms_bin: 0 -> '0', 0.05 -> '<0.08', 0.08 -> '<0.15', 0.149 -> '<0.15', 0.15 -> '>=0.15'",
           [judge.rms_bin(x) for x in (0.0, 0.05, 0.08, 0.149, 0.15, 1.0)] == ["0", "<0.08", "<0.15", "<0.15", ">=0.15", ">=0.15"])
     disp_in = [dict(qm9_index="a", distribution="interpolation", rms_displacement_A=0.0, rms_bin="0", has_hessian=True,
@@ -240,7 +240,7 @@ def main():
                  dict(QM9_INDEX="a", WHICH="base", SURVIVED=False, FAIL_T_K=300.0, FAIL_PS=2.0, MAX_RATIO=1.6, MIN_RATIO=0.9, N_STEPS=20, SECONDS=1.0)]
     lines = judge.verdict(dist, thermo, forget, noise_floor_cm=10.0, ramp_rows=ramp_rows, disp_rows=dr)
     by = {l["LINE"]: l for l in lines}
-    check("the verdict's rows carry GATE (S0-C-59): the Hessian matrix / in_distribution / forgetting yes; low-mode / entropy / held-out bins / ramp no",
+    check("the verdict's rows carry GATE: the Hessian matrix / in_distribution / forgetting yes; low-mode / entropy / held-out bins / ramp no",
           {l["LINE"]: l["GATE"] for l in lines} == {"held_out_hessian_cartesian": "yes", "in_distribution_degradation": "yes",
                                                      "forgetting": "yes", "held_out_low_mode_mae_cm": "no",
                                                      "model_error_s_ref_cal_per_mol_K": "no",
@@ -338,7 +338,7 @@ def main():
           and {l["LINE"]: l["RESULT"] for l in judge.verdict(dist, [], ok, ramp_rows=rr)}["md_ramp_K"] == "FAIL"
           and judge.verdict_of(judge.verdict(dist, [], ok, ramp_rows=rr)) == "PASS", rr)
 
-    check("the gate closed (S0-C-60): verdict_of(gate=False) is REPORTED whatever the rows say; open, the same rows read FAIL",
+    check("the gate closed: verdict_of(gate=False) is REPORTED whatever the rows say; open, the same rows read FAIL",
           judge.verdict_of(judge.verdict(worse_h, [], ok_forget_probe), gate=False) == "REPORTED"
           and judge.verdict_of(judge.verdict(worse_h, [], ok_forget_probe), gate=True) == "FAIL" and judge.GATE_CLOSED == "REPORTED")
 

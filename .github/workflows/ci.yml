@@ -1,6 +1,6 @@
-# The public install path on a clean machine (spec-repo-swap.md, decision 9):
-# install.sh in URL mode, then the two tests that need nothing from the private
-# openQHA checkout. The full suite stays local / Tianhe.
+# The public install path on a clean machine:
+# install.sh in URL mode, then the two tests that need nothing from the openQHA
+# checkout. The full suite stays local / Tianhe.
 name: ci
 
 on:

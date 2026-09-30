@@ -9,9 +9,8 @@ description = "Hessian learning for openQHA: the loss side of fine-tuning MACE-O
 requires-python = ">=3.10"
 
 # The fork's stack (pyproject.toml of BloomDlwlrma/mace): setuptools, flat one-package
-# layout. No dependencies are declared until ticket 05 ("Install and transport") settles
-# how a machine gets openQHA (a checkout today, not a distribution) and the mace fork;
-# the working env is three things -- openQHA checkout, this package, the fork -- and pip
-# must not try to resolve the two that have no PyPI form.
+# layout. No dependencies are declared: the working environment is three things -- an
+# openQHA checkout (a checkout, not a distribution), this package and the mace fork --
+# and pip must not try to resolve the two that have no PyPI form.
 [tool.setuptools]
 packages = ["openqha_hessian"]

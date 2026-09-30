@@ -1,14 +1,14 @@
-"""Tickets 11 and 35 of the Hessian-learning set: Algorithms 1-2 of the PHL loss
+"""Algorithms 1-2 of the PHL loss
 (`openqha_hessian.phl`) on the propanal fixture -- no engine.
 
 H_r = the ORCA wB97M-D3BJ/def2-TZVPPD Hessian of basin 0 (`job.hess`), H_theta = the
 stored MACE-OFF23_medium Hessian at the same geometry (`hessian_at_<level>.npy`).
 
-PHL VERBATIM (S0-C-64), the derivations of spec `spec-phl-verbatim.md` step 2 run on
-that pair: eq. 1' is the mean square per matrix element; Derivation 2.3 -- the 3N unit
-probes reproduce it to 1e-12 with zero variance; Derivation 2.1 -- 4000 Rademacher and
+PHL VERBATIM, the derivations (T04, sections 2 and 6) run on
+that pair: eq. 1' is the mean square per matrix element; the 3N unit
+probes reproduce it to 1e-12 with zero variance; 4000 Rademacher and
 4000 Gaussian single-probe draws have their mean within 3 standard errors of it;
-Derivation 2.2 -- each sample variance is within 5 % of the closed form, and the
+each sample variance is within 5 % of the closed form, and the
 Gaussian one is strictly the larger (the kurtosis term 2 sum_i B_ii^2); the variance
 falls as 1/k; the probe is the RAW draw and r_j = H_r v_j. Refused: an unknown probe
 mode, `modes` (there is no such probe any more), a `metric` or masses in the signature,
@@ -54,12 +54,12 @@ def main():
     d = H_t - H_r
     check("eq. 1': loss_full = ||dH||_F^2 / (9 N^2) (1e-16); ~1e-2..1e-1 eV^2/A^4 on propanal",
           abs(L - np.sum(d * d) / n3 ** 2) < 1e-16 and 1e-3 < L < 1.0, L)
-    check("cartesian_loss_full is the same function under its ticket-21 name",
+    check("cartesian_loss_full is the same function under its earlier name",
           phl.cartesian_loss_full is phl.loss_full)
 
-    # --- Derivation 2.3: the 3N unit probes are the full matrix ------------------------------
+    # --- the 3N unit probes are the full matrix ----------------------------------------------
     v, r, info = phl.make_probes(H_r, mode="cartesian")
-    check("Derivation 2.3: v = I, r = H_r, k = 3N, denominator 9 N^2, estimator = eq. 1' to 1e-12",
+    check("v = I, r = H_r, k = 3N, denominator 9 N^2, estimator = eq. 1' to 1e-12",
           np.array_equal(v, np.eye(n3)) and np.abs(r - H_r).max() < 1e-12 and info["k"] == n3
           and info["denominator"] == n3 * n3 and info["nu"] == n3 * n3 and info["stochastic"] is False
           and abs(phl.estimator_from_products(v @ H_t, r, info) - L) < 1e-12,
@@ -74,7 +74,7 @@ def main():
     check("k = 3 Gaussian: the draw is standard normal, r = H_r v (1e-12)",
           vg.shape == (3, n3) and np.abs(rg - vg @ H_r).max() < 1e-12 and abs(vg.std() - 1.0) < 0.2, vg.std())
 
-    # --- Derivations 2.1 and 2.2: unbiased, and the two variances ----------------------------
+    # --- unbiased, and the two variances -----------------------------------------------------
     draws = {}
     for mode, seed in (("rademacher", 11), ("gaussian", 13)):
         rng = np.random.default_rng(seed)
@@ -88,19 +88,19 @@ def main():
         vals = draws[mode]
         n = len(vals)
         se = math.sqrt(var1[mode] / n)
-        check("Derivation 2.1 ({}): 4000 draws' mean within 3 s.e. of eq. 1' ({:.2f} s.e.)".format(
+        check("{}: 4000 draws' mean within 3 s.e. of eq. 1' ({:.2f} s.e.)".format(
               mode, abs(vals.mean() - L) / se), abs(vals.mean() - L) < 3 * se, (vals.mean(), L, se))
         # the sample variance has its own sampling error, sd(s^2) = s^2 sqrt((kurt - 1)/n);
         # for the Gaussian draw X is a weighted sum of chi^2_1 and that band is ~6 %, so the
         # tolerance is read off the draws rather than invented
         kurt = float(np.mean((vals - vals.mean()) ** 4) / vals.var() ** 2)
         se_var = vals.var() * math.sqrt((kurt - 1) / n)
-        check("Derivation 2.2 ({}): sample variance within 3 sd(s^2) of the closed form "
+        check("{}: sample variance within 3 sd(s^2) of the closed form "
               "({:.3e} vs {:.3e}, band {:.1%})".format(mode, vals.var(), var1[mode], 3 * se_var / var1[mode]),
               abs(vals.var() - var1[mode]) < 3 * se_var, (vals.var(), var1[mode], se_var))
     b = (H_t - H_r).T @ (H_t - H_r)
     kurtosis_term = 2.0 * float(np.sum(np.diag(b) ** 2)) / (float(n3 ** 2) ** 2)
-    check("Derivation 2.2: Var_Gaussian - Var_Rademacher = 2 sum_i B_ii^2 / (9N^2)^2 (1e-18), and it is > 0",
+    check("Var_Gaussian - Var_Rademacher = 2 sum_i B_ii^2 / (9N^2)^2 (1e-18), and it is > 0",
           abs((var1["gaussian"] - var1["rademacher"]) - kurtosis_term) < 1e-18 and kurtosis_term > 0
           and draws["gaussian"].var() > draws["rademacher"].var(),
           (var1["gaussian"] - var1["rademacher"], kurtosis_term))
@@ -118,9 +118,9 @@ def main():
             check("probe mode {!r} is refused".format(bad_mode), "probe mode must be one of" in str(exc))
     try:
         phl.make_probes(H_r, mode="rademacher", metric="cartesian")
-        check("make_probes takes no `metric` (there is one target, S0-C-64)", False)
+        check("make_probes takes no `metric` (there is one target)", False)
     except TypeError:
-        check("make_probes takes no `metric` (there is one target, S0-C-64)", True)
+        check("make_probes takes no `metric` (there is one target)", True)
     try:
         phl.make_probes(masses, x_r, H_r)
         check("make_probes takes no masses or positions", False)

@@ -1,10 +1,10 @@
-"""Tickets 11, 21 and 35 of the Hessian-learning set: the loss module
-(`openqha_hessian.phl_loss`) on a toy potential and a stand-in batch carrying ticket
-12's fields -- no engine.
+"""The loss module
+(`openqha_hessian.phl_loss`) on a toy potential and a stand-in batch carrying the
+fork's Hessian-label fields -- no engine.
 
 Two toy potentials (a pair MLP + confinement) with different parameters play the model
-(theta) and the reference; H_r is the reference toy's exact Hessian. There is ONE target
-(S0-C-64): the raw Cartesian matrix over (3N)^2.
+(theta) and the reference; H_r is the reference toy's exact Hessian. There is ONE target:
+the raw Cartesian matrix over (3N)^2.
 
 Asserted -- Algorithm 3 on the loop: the 3N unit probes through the HVP path and the
 full-matrix path both equal `phl.loss_full` to 1e-12; autograd dL/dtheta equals a central
@@ -13,11 +13,11 @@ losses to 1e-13; a third, unlabelled frame changes nothing; a batch with no Labe
 and still backpropagates; H_r := H_theta gives 0 with a zero gradient and H_r := 0.81
 H_theta gives 0.19^2 ||H_theta||_F^2/(9N^2) with a non-zero one; a `hessian` field of the
 wrong length is refused; the Rademacher estimator with k = 4 over 400 seeds has its mean
-within 3 sigma of the exact loss and the variance Derivation 2.2 gives.
+within 3 sigma of the exact loss and the closed-form variance.
 
-Algorithm 1 (ticket 35): `FrameConstants` is the Label and nu = 9 N^2 -- three slots, no
+Algorithm 1: `FrameConstants` is the Label and nu = 9 N^2 -- three slots, no
 seed, no masses, no positions, no projector, no reference modes; built per call and keyed
-by nothing (S0-C-67). Algorithm 4 (S0-C-55): in eval mode the Hessian term is the same on
+by nothing. Algorithm 4: in eval mode the Hessian term is the same on
 two calls (1e-12, the frame's fixed probes), is the same under another mace seed, differs
 between frames, and differs from a training call's fresh draw; `eval_summary()` averages
 the three terms over the pass and resets; `wants_hessian_at_eval` is False and
@@ -81,8 +81,8 @@ K_MAX = 16
 
 def stored_probes(n_atoms, seed, k_max=K_MAX):
     """What the Dataset writes with a labelled frame: [k_max, 3N] ~ N(0, I) (PHL's
-    Algorithm 1, S0-C-68) from the frame's IDENTITY (here the caller's `seed` stands for
-    it) -- never from the Label (S0-C-67)."""
+    Algorithm 1) from the frame's IDENTITY (here the caller's `seed` stands for
+    it) -- never from the Label."""
     return np.random.default_rng(seed).standard_normal((k_max, 3 * n_atoms))
 
 
@@ -231,13 +231,13 @@ def main():
     vals = np.array(vals)
     sig_mean = np.sqrt(var / n_seeds)
     check("Rademacher k=4 over {} seeds: mean within 3 sigma of the exact loss ({:.2f} sigma), "
-          "sample variance within 25 % of Derivation 2.2".format(n_seeds, abs(vals.mean() - exact_a) / sig_mean),
+          "sample variance within 25 % of the closed form".format(n_seeds, abs(vals.mean() - exact_a) / sig_mean),
           abs(vals.mean() - exact_a) < 3 * sig_mean and abs(vals.var() / var - 1) < 0.25,
           (vals.mean(), exact_a, vals.var(), var))
 
-    # --- Algorithm 1: what the frame's constants are now (ticket 35) --------------------------------------
+    # --- Algorithm 1: what the frame's constants are -------------------------------------------------------
     c = loss.constants(Ha)
-    check("FrameConstants = the Label and nu = 9 N^2 -- three slots, nothing else (S0-C-67)",
+    check("FrameConstants = the Label and nu = 9 N^2 -- three slots, nothing else",
           c.n3 == 3 * n_a and c.nu == (3 * n_a) ** 2
           and set(phl_loss.FrameConstants.__slots__) == {"hessian_r", "n3", "nu"},
           phl_loss.FrameConstants.__slots__)
@@ -267,7 +267,7 @@ def main():
     check("repr names every setting and the one target",
           "hessian_weight=7.500" in repr(b) and "probe='gaussian'" in repr(b) and "seed=11" in repr(b)
           and "target='cartesian'" in repr(b), repr(b))
-    check("wants_hessian_at_eval is False and wants_force_graph_at_eval True (S0-C-55; the fork's evaluate reads both)",
+    check("wants_hessian_at_eval is False and wants_force_graph_at_eval True (the fork's evaluate reads both)",
           b.wants_hessian_at_eval is False and b.wants_force_graph_at_eval is True)
     b_default = phl_loss.build(argparse.Namespace(energy_weight=1.0, forces_weight=100.0, hessian_weight=1.0, seed=1))
     check("build(args) without any target flag builds the Cartesian loss",
@@ -291,7 +291,7 @@ def main():
     except TypeError:
         check("the constructor takes no `mode_weighting` (there is one target)", True)
 
-    # --- validation: four probes fixed per frame (S0-C-55) ---------------------------------------------
+    # --- validation: four probes fixed per frame -------------------------------------------------------
     lv = phl_loss.WeightedEnergyForcesHessianLoss(probe="rademacher", n_probes=4, seed=3)
     lv.eval()
     ref, pred = make_batch([(xa, ma, Ha)], toy)
@@ -306,7 +306,7 @@ def main():
     check("... and a second module with another mace seed gives the same value: the probes come from the file, not the seed",
           abs(float(lv2.hvp_error(ref, pred)) - v1) < 1e-12)
 
-    # S0-C-67: the probes do not move when the Label is rewritten bit-for-bit differently at
+    # the probes do not move when the Label is rewritten bit-for-bit differently at
     # the SAME level -- this is the regression the stored set exists for
     Ha_rewritten = Ha + 0.0                      # a different object, the same physics
     Ha_rewritten[0, 0] = np.nextafter(Ha[0, 0], np.inf)
@@ -329,7 +329,7 @@ def main():
         check("a labelled validation frame with no stored probes is REFUSED, not drawn for", False)
     except ValueError as exc:
         check("a labelled validation frame with no stored probes is REFUSED, not drawn for",
-              "S0-C-67" in str(exc) and "04_dataset" in str(exc), str(exc))
+              "no valid_probes" in str(exc) and "04_dataset" in str(exc), str(exc))
     try:
         lv.constants(Ha).probes("rademacher", 32, stored=store_a)
         check("asking for more probes than the Dataset stored is refused naming VALID_PROBE_KMAX", False)
@@ -349,7 +349,7 @@ def main():
     t2 = float(lv.hvp_error(ref, pred))
     check("training mode: fresh draws, two calls differ", abs(t1 - t2) > 1e-9, (t1, t2))
     var_c = phl.estimator_variance(Ha_t, Ha, k=4)["rademacher"]
-    check("the fixed validation value is within 4 sigma of the exact loss (Derivation 2.2 for k = 4)",
+    check("the fixed validation value is within 4 sigma of the exact loss (the closed-form variance for k = 4)",
           abs(v1 - exact_a) < 4 * np.sqrt(var_c), (v1, exact_a, np.sqrt(var_c)))
     # the summary over a pass: E and F averaged per graph, H per labelled graph, then reset
     lv.eval()
@@ -366,7 +366,7 @@ def main():
           and summary["valid_forces_term"] is not None and summary["valid_energy_term"] is not None
           and lv._eval_sums["n_batches"] == 0,           # reset; hvp_error alone (above) does not accumulate
           summary)
-    check("eval_summary no longer reports a target: there is one (S0-C-64)", "valid_target" not in summary, summary)
+    check("eval_summary no longer reports a target: there is one", "valid_target" not in summary, summary)
     lv.eval_summary()
     check("eval_summary on an empty pass answers None terms", lv.eval_summary()["valid_hessian_term"] is None)
     lv.train()

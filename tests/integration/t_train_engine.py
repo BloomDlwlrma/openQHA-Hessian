@@ -1,10 +1,10 @@
-"""Ticket 13 of the Hessian-learning set: `openqha_hessian.run` fine-tunes the real
-MACE-OFF23_medium through the mace fork, with the Hessian loss; tickets 18 and 21
-(2026-09-21): the Replay that acts and is recorded, the Cartesian target, the
+"""`openqha_hessian.run` fine-tunes the real
+MACE-OFF23_medium through the mace fork, with the Hessian loss: the Replay that acts
+and is recorded, the Cartesian target, the
 fixed-probe validation and the explicit control.
 
 INTEGRATION (engine, CPU, minutes). Builds a two-molecule Dataset directory from the
-2-methyloxirane frame fixture -- BASIN frames only in train and valid (S0-C-54), the
+2-methyloxirane frame fixture -- BASIN frames only in train and valid, the
 displaced frames of the fixture unused here -- then:
 
   * (21) a 4-epoch fine-tune with the default target (`cartesian`, `rademacher` k = 4):
@@ -48,10 +48,10 @@ def check(label, ok, detail=""):
 
 def build_dataset(tmp, name, level):
     """A Dataset directory with the merged MACE-form file: train = the basin frame,
-    valid = the basin frame again (S0-C-54: basin frames only; the machinery, not
+    valid = the basin frame again (basin frames only; the machinery, not
     generalisation). Two copies in each split so mace's batch of 2 is full.
 
-    Every row carries its fixed probe set, as `dataset.build` writes it (S0-C-67): drawn
+    Every row carries its fixed probe set, as `dataset.build` writes it: drawn
     from the frame's identity, stored in the file, read by the loss whenever it is in eval
     mode -- which mace also is on the TRAINING split, for its final error table.
     """
@@ -230,7 +230,7 @@ def main():
             hessian_weight="balance", max_epochs=3, batch_size=2, seed=7,
             multiheads=True, pt_train_file=str(pt), pt_valid_file=str(pt_valid))
         mi = mh["info"]
-        check("w_H = balance (S0-C-60): the rule and the three base-model terms are in the Record and w_H = w_F L_F / L_H",
+        check("w_H = balance: the rule and the three base-model terms are in the Record and w_H = w_F L_F / L_H",
               mi["HESSIAN_WEIGHT_RULE"] == "balance" and mi["BALANCE_L_H"] > 0
               and abs(mi["HESSIAN_WEIGHT"] - 100.0 * mi["BALANCE_L_F"] / mi["BALANCE_L_H"]) < 1e-9
               and abs(mi["SWA_HESSIAN_WEIGHT"] - mi["HESSIAN_WEIGHT"]) < 1e-12, (mi["HESSIAN_WEIGHT"], mi["BALANCE_L_F"], mi["BALANCE_L_H"]))
@@ -253,7 +253,7 @@ def main():
               all("REF_hessian" not in a.info for a in read(str(pt), index=":", format="extxyz"))
               and mi["N_TRAIN_HESSIAN"] == 2)
 
-        # --- ticket 34: the exact anchors (path A, S0-C-65) ---------------------------------------
+        # --- the exact anchors --------------------------------------------------------------------
         before, after = mi["VALID_HESSIAN_EXACT_BEFORE"], mi["VALID_HESSIAN_EXACT_AFTER"]
         exact_base = train_run.exact_valid_hessian("MACE-OFF23_medium", mi["VALID_FILE"])
         check("the Record carries both exact anchors, positive, and the BEFORE one is the base model's "

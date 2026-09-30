@@ -3,14 +3,14 @@
 PRODUCTION. What lives here decides the fine-tuned potential's numbers.
 
 This is the `openqha-hessian` distribution (`import openqha_hessian`): the training
-side of openQHA, moved out of `openqha/training/` (2026-09) so that its churn -- the
-campaign's loss, probes, judge, training run -- no longer appears in openQHA's history.
+side of openQHA, as its own package (formerly `openqha/training/`), so that its churn
+-- the campaign's loss, probes, judge, training run -- stays out of openQHA's history.
 The dependency direction is one way: this package imports
 `openqha.{data,store,thermochem,potentials}` and the mace fork, and **openQHA never
 imports this package**. The entry points stay openQHA's
 (`workflows/hessian_learning/05_train.py`, `06_judge.py`).
 
-The pattern is mace-md's (`source-code/mace-md-master`): everything that can be written
+The pattern is mace-md's: everything that can be written
 against mace's PUBLIC API lives in this package -- the Hessian-vector product (`hvp`),
 the probes and the Hessian loss (`phl`, `phl_loss`), the judge (`judge`), the training
 run and the smoke fit (`run`, `smoke_fit`) --
@@ -23,7 +23,7 @@ number depends on, and the fine-tuned potential is a production number.
 
 Derivations and the numbers every test here is checked against:
 `docs/tutorials/archive/T03_openQHA_Theory_Projected_Hessian_Loss.ipynb` in the openQHA
-checkout, the long form of `.scratch/hessian-learning-set/design-phl-loss.md`.
+checkout.
 """
 
 

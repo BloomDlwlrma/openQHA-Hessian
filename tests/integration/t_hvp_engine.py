@@ -1,4 +1,4 @@
-"""Ticket 10 of the Hessian-learning set: the HVP by autograd on the REAL engine
+"""The HVP by autograd on the REAL engine
 equals the shipped full Hessian, column by column.
 
 INTEGRATION. Loads MACE-OFF23_medium, takes the reference geometry of propanal basin 0

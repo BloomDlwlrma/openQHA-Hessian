@@ -1,4 +1,4 @@
-"""Ticket 13 of the Hessian-learning set: what `openqha_hessian.run` builds for mace,
+"""What `openqha_hessian.run` builds for mace,
 what it refuses, and what its Record says -- no engine, no training.
 
 Asserted: `mace_argv` names the external loss and the Dataset's keys, float64 and the
@@ -10,14 +10,14 @@ as a shadow of the install; the Record's schema covers every key `run_training` 
 `parse_results` / `parse_epochs` read mace's two output forms; `registry_entry` names
 the index and the config SHA.
 
-Ticket 18 (the Replay corrections): the argv never contains `num_samples_pt`, contains
+The Replay: the argv never contains `num_samples_pt`, contains
 `--real_pt_data_ratio_threshold 0` with `--multiheads` and not without, passes
 `--pt_valid_file`; `replay_file_summary` counts a two-frame file with `config_weight = 3`
 and reads `3.0` (and `mixed`, and `1.0` without the key); `parse_head_counts` reads both
 heads' lines; the schema has the four `PT_*` keys and no `NUM_SAMPLES_PT`; `run_training`
 refuses `num_samples_pt`; `smoke_fit.replay_ratio` unchanged.
 
-Ticket 21 (the control): `mace_argv` carries `--lr`, `--scheduler_patience 20`,
+The control: `mace_argv` carries `--lr`, `--scheduler_patience 20`,
 `--patience 50`, `--eval_interval 1`, `--ema`, `--swa --start_swa 3/4 --swa_lr lr/40`
 and the Stage Two weights with `swa_hessian_weight = w_H x w_F^(2) / w_F` (the rule as
 arithmetic); the target defaults to cartesian; `parse_results` / `parse_epochs` yield
@@ -73,7 +73,7 @@ def main():
     check("without --multiheads the replay is off, no pt file is named and no duplication threshold is emitted",
           p["--multiheads_finetuning"] == "False" and "--pt_train_file" not in p
           and "--real_pt_data_ratio_threshold" not in p)
-    check("num_samples_pt never appears in the argv (ticket 18)", "--num_samples_pt" not in p)
+    check("num_samples_pt never appears in the argv", "--num_samples_pt" not in p)
     p2 = pairs(train_run.mace_argv("tr.xyz", "va.xyz", "r", "/tmp", "/w/b.model", "l",
                                    multiheads=True, pt_train_file="spice.xyz", pt_valid_file="spice.valid.xyz"))
     check("--multiheads adds the replay head, its file, its validation file and the threshold 0 -- and no sample count",
@@ -87,7 +87,7 @@ def main():
         check("mace_argv refuses num_samples_pt", True)
     extra = train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", extra=["--clip_grad", "1.0"])
     check("--mace-arg passes through as given", extra[-2:] == ["--clip_grad", "1.0"])
-    # --- the control (ticket 21) ------------------------------------------------------------------
+    # --- the control -------------------------------------------------------------------------------
     pc = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", max_epochs=100, hessian_weight=0.02,
                                    forces_weight=100.0))
     check("the control defaults: lr 0.01, scheduler_patience 20, patience 50, eval_interval 1, ema, swa at 75, swa_lr 0.00025",
@@ -234,7 +234,7 @@ def main():
     check("parse_head_counts: both heads' train / valid and the pretraining summary line",
           heads == {"Default": (17132, 850), "pt_head": (5000, 200), "pt": (5000, 200)}, heads)
 
-    # --- the Replay file (ticket 18) ------------------------------------------------------------
+    # --- the Replay file ------------------------------------------------------------------------
     from ase.io import write as ase_write
     with tempfile.TemporaryDirectory() as td:
         td = Path(td)
@@ -286,7 +286,7 @@ def main():
     check("every key run_training writes is in the schema", written <= schema, sorted(written - schema))
     check("the stale NUM_SAMPLES_PT key is gone from the schema; the four PT_* keys are there",
           "NUM_SAMPLES_PT" not in schema and {"PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN", "FT_HEAD_TRAIN"} <= schema)
-    check("the retired weight-identity keys are gone from the schema (decision 04)",
+    check("the retired weight-identity keys are gone from the schema",
           not {"FOUNDATION_PARAMS_SHA256", "MODEL_PARAMS_SHA256", "MODEL_N_TENSORS", "ENGINE_PARAMS_SHA256"} & schema)
 
     info = dict(FOUNDATION_MODEL="MACE-OFF23_medium", RUN="w1", INDEX_FILE="/r/index.dat",

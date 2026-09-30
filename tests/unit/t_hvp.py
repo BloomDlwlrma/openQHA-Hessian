@@ -1,7 +1,7 @@
-"""Ticket 10 of the Hessian-learning set: the Hessian-vector product by autograd
+"""The Hessian-vector product by autograd
 (`openqha_hessian.hvp`, eq. 9) on a toy potential -- no engine, no MACE weights.
 
-Asserted (the numbers are T03 section 5's, A7): reverse-over-reverse, forward-over-
+Asserted (the numbers are T03's, section 5): reverse-over-reverse, forward-over-
 reverse (`torch.func.jvp` of the gradient) and the explicit `torch.autograd.functional
 .hessian` agree to 1e-12; `create_graph=True` returns a tensor whose graph reaches
 every parameter that shapes curvature, `create_graph=False` returns one with no

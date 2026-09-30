@@ -1,32 +1,31 @@
 """The Hessian loss as a mace loss module: Algorithm 3 with the HVP estimator (eq. 6')
 in training and the SAME estimator on four probes fixed per frame in evaluation.
 
-PRODUCTION. Ticket 11 of the Hessian-learning set; the Cartesian target and the
-fixed-probe validation of ticket 21 (S0-C-53, S0-C-55); PHL verbatim by ticket 35
-(S0-C-64, 2026-09-23): there is ONE target and nothing is projected but the probe.
+PRODUCTION. PHL verbatim: there is ONE target -- the raw Cartesian matrix -- and
+nothing is projected but the probe.
 
 This is the `nn.Module` mace's `train()` calls as `loss_fn(pred=output, ref=batch)`. It
-reaches mace through the fork's external-loss hook (ticket 13: `--loss external
+reaches mace through the fork's external-loss hook (`--loss external
 --loss_module openqha_hessian.phl_loss:build`); the E and F terms are mace's own
 (`mace.modules.loss`, public), the Hessian term is here. The batch fields it reads are
-the ones the fork's commit A adds (ticket 12): `hessian` (the Labels, flattened 9 n_k^2
+the ones the fork's commit A adds: `hessian` (the Labels, flattened 9 n_k^2
 per graph and concatenated like `ptr`), `has_hessian` [n_graphs], `hessian_weight`
 [n_graphs], `sqrt_masses` [n_nodes]; and mace's `ptr`, `weight`, `positions`.
 
 THE TARGET. The raw Cartesian matrix, PHL's eq. 2.1': rho_j = H_theta v_j - H_r v_j
 over 9 N^2 k -- no mass weighting, no Eckart projection, no reference modes, no
-entropy weights. The projected targets of T03 were deleted with ticket 35; the standard
-vibrational analysis is the judge's business, not the loss's.
+entropy weights. The projected variants belong to the archived T03 design, not to this
+loss; the standard vibrational analysis is the judge's business.
 
 TRAINING. The HVP is taken INSIDE the loss from `pred["forces"]` and `ref["positions"]`
 (`hvp.hvp_from_forces`, create_graph=True) -- one backward pass per probe index for the
 whole batch, since a batch is block-diagonal. The probes are fresh draws from the
 module's generator (mace's seed) every step.
 
-EVALUATION (S0-C-55). The fork's `evaluate` puts the loss in eval mode (commit C) and,
+EVALUATION. The fork's `evaluate` puts the loss in eval mode (commit C) and,
 because `wants_force_graph_at_eval` is set, calls the model with the force graph kept;
 the Hessian term is then the same estimator on `VALID_N_PROBES` standard-normal probes that
-the DATASET drew and stored with the frame (S0-C-67, PHL's fixed-vector protocol): the
+the DATASET drew and stored with the frame (PHL's fixed-vector protocol): the
 loss takes the first k rows of `ref.valid_probes` and draws nothing. They are identical
 every epoch for a frame, independent between frames, reproducible from the Dataset's
 Record alone, and unchanged when the Label is recomputed at the same level -- so the
@@ -52,9 +51,9 @@ import torch
 from openqha_hessian import hvp as hvp_mod
 from . import phl
 
-#: the validation estimator (S0-C-55, S0-C-67, S0-C-68): k fixed standard-normal probes per
-#: frame, drawn by the Dataset and read from the file
-VALID_PROBE = "gaussian"                                   # PHL's Algorithm 1 (S0-C-68)
+#: the validation estimator: k fixed standard-normal probes per frame, drawn by the
+#: Dataset and read from the file
+VALID_PROBE = "gaussian"                                   # PHL's Algorithm 1
 VALID_N_PROBES = 4
 PROBES_LABEL_FORM = "{} k={} fixed, stored by the Dataset"
 VALID_PROBES_LABEL = PROBES_LABEL_FORM.format(VALID_PROBE, VALID_N_PROBES)
@@ -78,7 +77,7 @@ def _has(ref, name):
 
 class FrameConstants:
     """Algorithm 1: what the loss needs of one frame -- the Label as stored and nu = 9 N^2.
-    Nothing is diagonalised, projected, mass-weighted (S0-C-64) or hashed (S0-C-67)."""
+    Nothing is diagonalised, projected, mass-weighted or hashed."""
 
     __slots__ = ("hessian_r", "n3", "nu")
 
@@ -93,7 +92,7 @@ class FrameConstants:
         TRAINING (`rng` given): a fresh draw every step, from mace's generator.
         VALIDATION (`rng` None): the frame's STORED set -- the first k of the
         [k_max, 3N] rows the Dataset drew from the frame's identity and wrote into the
-        valid file (S0-C-67). The loss draws nothing there and derives nothing from the
+        valid file. The loss draws nothing there and derives nothing from the
         Label: a Label recomputed at the same level leaves these vectors untouched.
         """
         if rng is not None:
@@ -101,7 +100,7 @@ class FrameConstants:
         if stored is None:
             raise ValueError(
                 "a labelled validation frame carries no valid_probes: the fixed probes are drawn by "
-                "the Dataset and stored in the valid file (S0-C-67), and this loss draws none. "
+                "the Dataset and stored in the valid file, and this loss draws none. "
                 "Rebuild the Dataset with 04_dataset.py so that valid.<level>.extxyz carries "
                 "REF_valid_probes, and train against a fork that has commit D.")
         v = np.asarray(stored, dtype=float)
@@ -119,9 +118,9 @@ class FrameConstants:
 
 def graph_labels(ref):
     """Per graph: (index, n_atoms, H_r [3n, 3n] numpy or None, masses, positions, probes)
-    read from the batch fields of tickets 12 and 36. Graphs without a Label give None for
-    `H_r`; graphs without a stored probe set give None for `probes` (every labelled frame has
-    one, S0-C-67 -- mace evaluates the loss on the training split too; a pool frame, which
+    read from the batch fields the fork's commits A and D add. Graphs without a Label give
+    None for `H_r`; graphs without a stored probe set give None for `probes` (every labelled
+    frame has one -- mace evaluates the loss on the training split too; a pool frame, which
     has no Label at all, has none)."""
     ptr = _field(ref, "ptr").detach().cpu().numpy()
     n_k = ptr[1:] - ptr[:-1]
@@ -179,7 +178,7 @@ class WeightedEnergyForcesHessianLoss(torch.nn.Module):
     "hessian" (training: fresh probes; evaluation: the frame's fixed probes), the exact
     full-matrix value (eq. 1') when it has (the judge's path)."""
 
-    #: the fork's `evaluate` reads these: no full Hessian at evaluation (S0-C-55), but
+    #: the fork's `evaluate` reads these: no full Hessian at evaluation, but
     #: the force graph kept so the estimator can take its HVPs there
     wants_hessian_at_eval = False
     wants_force_graph_at_eval = True
@@ -209,9 +208,9 @@ class WeightedEnergyForcesHessianLoss(torch.nn.Module):
 
     # ---- per-frame constants ---------------------------------------------------------
     def constants(self, hessian_r):
-        """Algorithm 1 for one frame. Not cached and not keyed: since ticket 35 a
-        FrameConstants is an `asarray` and two integers, and since S0-C-67 there is
-        nothing left that a cache key could be derived from -- the probes come with the
+        """Algorithm 1 for one frame. Not cached and not keyed: a
+        FrameConstants is an `asarray` and two integers, and there is
+        nothing a cache key could be derived from -- the probes come with the
         graph, not from the Label."""
         return FrameConstants(hessian_r)
 
@@ -222,7 +221,7 @@ class WeightedEnergyForcesHessianLoss(torch.nn.Module):
         (g, slice, k_g, v [k_g, 3n], r_j [k_g, 3n] numpy, constants, denominator).
         In training mode the probes are fresh draws (`self.probe`, `self.n_probes`); in
         eval mode the first `valid_n_probes` rows of the set the Dataset stored with the
-        frame (S0-C-67) -- nothing is drawn and nothing is derived from the Label."""
+        frame -- nothing is drawn and nothing is derived from the Label."""
         labels = graph_labels(ref)
         ptr = _field(ref, "ptr").detach().cpu().numpy()
         n_nodes = int(ptr[-1])
@@ -368,11 +367,11 @@ class WeightedEnergyForcesHessianLoss(torch.nn.Module):
 
 def build(args):
     """The factory the fork's `--loss external --loss_module openqha_hessian.phl_loss:build`
-    calls with mace's parsed arguments (ticket 13's flags; every one has a default).
+    calls with mace's parsed arguments (the fork's flags; every one has a default).
 
-    There is one target (S0-C-64), so there is nothing here to select it with: fork
+    There is one target, so there is nothing here to select it with: fork
     commit D took `--hessian_mode_weighting` and `--hessian_probe modes` out of the
-    parser (ticket 36), and a run that names either now fails in mace's own argument
+    parser, and a run that names either fails in mace's own argument
     parsing, before a model is built.
     """
     return WeightedEnergyForcesHessianLoss(

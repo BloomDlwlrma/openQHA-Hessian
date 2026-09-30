@@ -1,11 +1,11 @@
-"""The ruler: what a fine-tuned potential is judged by (Algorithm 5 of spec-phl-verbatim.md).
+"""The ruler: what a fine-tuned potential is judged by (Algorithm 5).
 
-PRODUCTION. Ticket 14 of the Hessian-learning set.
+PRODUCTION.
 
 The judge reads only SHIPPED paths: the full Cartesian Hessian from
 `MACECalculator.get_hessian` (mace's `compute_hessians_vmap`, no graph) against the
-Label, through `hessian_compare` -- the same four metric families every earlier
-comparison in this repository used. **Nothing here calls the estimator or the training
+Label, through `hessian_compare` -- the same four metric families openQHA's Hessian
+comparisons use. **Nothing here calls the estimator or the training
 loss.** The optimiser reads eq. 6; the judge reads the Cartesian target
 `||H - H_r||_F^2 / (9 N^2)`, exactly, from the full matrix.
 That separation is the point: a loss that flatters itself cannot flatter the ruler.
@@ -18,19 +18,20 @@ What one judge run reports:
   per class        the structure classes of `index.dat`, so "how are we doing on
                    epoxides" has an answer
   per distribution `out_of_molecule` (whole molecules the fine-tune never saw: the pinned
-                   seven and, under the by-molecule split of S0-C-65, every drawn test
-                   molecule -- so this is the generalisation reading the gate row rests on),
+                   seven and, under the whole-molecule split (the production default),
+                   every drawn test molecule -- so this is the generalisation reading the
+                   gate row rests on),
                    `interpolation` (a test frame of a TRAINING molecule: only the by-frame
                    split of the smoke / fit Datasets produces one; empty in production)
                    and `in_distribution` (the shipped molecules, which MACE-OFF23 did see)
-  anharmonic       reference modes the entropy tier must not be judged on (round-2 Q6 (a),
-                   assumed): omega_r < ANHARMONIC_CM, or a `mode_curvature` self-check
+  anharmonic       reference modes the entropy tier must not be judged on:
+                   omega_r < ANHARMONIC_CM, or a `mode_curvature` self-check
                    above FD_SELF_CHECK_CM where a profile exists
   thermochemistry  read from the msRRHO Records on disk, never recomputed here (running
                    CREST and an optimisation inside the judge would make the judge a
                    producer of the numbers it judges)
-  forgetting       E and F RMSE on a fixed SPICE draw, engine against base (round-2 Q7)
-  displacement     the held-out generator's labelled frames (S0-C-54: displaced, merged,
+  forgetting       E and F RMSE on a fixed SPICE draw, engine against base
+  displacement     the held-out generator's labelled frames (displaced, merged,
                    saddle -- never trained on) binned by RMS displacement from the basin
                    (0 / < 0.08 / < 0.15 / >= 0.15 A), per distribution: H where a Label
                    Hessian exists, E and F everywhere -- Rodriguez's extrapolation readout
@@ -38,12 +39,12 @@ What one judge run reports:
                    model's own minimum, Langevin from 5 K, +5 K every 5 ps, until an atom
                    pair's 50-step mean distance leaves [0.75, 1.5] x its equilibrium value;
                    the failure temperature and time, engine beside base
-  verdict          one line per row (round-2 Q8 as the spec assumes; ticket 22, S0-C-58/59):
-                   GATE rows decide -- the HESSIAN MATRIX itself against the Label on the
-                   held-out Hessian frames, ||H_theta - H_r||_F^2 / (9 N^2), the training
-                   target's own number, engine against base (no worse); the
-                   in_distribution no-degradation; the forgetting line. Everything
-                   computed FROM the matrix afterwards is post-processing and a REFERENCE
+  verdict          one line per row: GATE rows decide -- the HESSIAN MATRIX itself
+                   against the Label on the held-out Hessian frames,
+                   ||H_theta - H_r||_F^2 / (9 N^2), the training target's own number,
+                   engine against base (no worse); the in_distribution no-degradation;
+                   the forgetting line. Everything computed FROM the matrix afterwards is
+                   post-processing and a REFERENCE
                    row, reported with PASS / FAIL against its number and never moving the
                    verdict: the low-mode frequency line (the standard vibrational analysis
                    of the trained matrix -- mass weighting + Eckart projection -- never the
@@ -70,23 +71,23 @@ from openqha_hessian import phl
 PROGNAME = "openQHA hl_judge"
 STEP = "judge"
 
-#: a reference mode below this is set aside from the entropy tier (round-2 Q6 (a))
+#: a reference mode below this is set aside from the entropy tier
 ANHARMONIC_CM = 30.0
 #: ... and so is one whose along-mode finite-difference self-check exceeds this
 FD_SELF_CHECK_CM = 5.0
-#: "low mode" of the judge's headline number, as everywhere else in this repository
+#: "low mode" of the judge's headline number, as everywhere else in openQHA
 LOW_CM = hc.LOW_CM
 
-#: the thresholds of round-2 Q8 as the spec assumes them; `judge.run(thresholds=)` overrides
+#: the default thresholds; `judge.run(thresholds=)` overrides
 THRESHOLDS = dict(
     hessian_cartesian_vs_base=0.0,  # engine's ||dH||^2/(9N^2) on the held-out Hessian frames <= the base's (ratio - 1 <= 0)
-    low_mode_mae_cm=8.5,            # the in-distribution value (propanal, S0-C-41); a reference row since S0-C-59
+    low_mode_mae_cm=8.5,            # the in-distribution value (propanal); a reference row
     model_error_s_ref=0.2,          # cal/mol/K, excluding the anharmonic modes
     in_distribution_degradation=0.15,   # no HIP metric worse than the base by more than this
     forgetting=0.15,                # SPICE E/F RMSE within this of the base's
 )
 
-#: the molecules MACE-OFF23 was trained on among the pinned seven (S0-C-40)
+#: the molecules MACE-OFF23 was trained on among the pinned seven
 IN_DISTRIBUTION = ("dsgdb9nsd_000018", "dsgdb9nsd_000019", "dsgdb9nsd_000035", "dsgdb9nsd_000036")
 
 #: the HIP metrics the no-degradation line watches
@@ -97,7 +98,7 @@ HIP_METRICS = ("HESSIAN_MAE", "FREQ_MAE_CM", "FREQ_MAE_LOW_CM", "EIGVAL_MAE_ECKA
 RMS_BINS = ((0.0, "0"), (0.08, "<0.08"), (0.15, "<0.15"), (float("inf"), ">=0.15"))
 #: the verdict's rows: which decide (gate: the Hessian MATRIX against the Label, engine vs
 #: base; no degradation in distribution; forgetting) and which are computed from the matrix
-#: afterwards -- post-processing, reported only (reference; S0-C-58/59)
+#: afterwards -- post-processing, reported only (reference)
 GATE_ROWS = ("held_out_hessian_cartesian", "in_distribution_degradation", "forgetting")
 REFERENCE_ROWS = ("held_out_low_mode_mae_cm", "model_error_s_ref_cal_per_mol_K", "held_out_generator_hessian_vs_base", "md_ramp_K")
 #: the MD ramp (Rodriguez 2025's protocol): start, step, hold per step, ceiling, timestep
@@ -118,18 +119,18 @@ FRAME_ROW = {
     "hessian_mae": ("Double", "eV/A^2", "engine: element-wise MAE of the Cartesian Hessian"),
     "eigval_mae_eckart": ("Double", "eV/A^2/amu", "engine: MAE of the projected eigenvalues"),
     "mixing": ("Double", None, "engine: off-diagonal weight of D in the reference-mode basis"),
-    "loss_cartesian": ("Double", "eV^2/A^4", "the training target exactly: ||H_theta - H_r||_F^2 / (9 N^2) (S0-C-53)"),
+    "loss_cartesian": ("Double", "eV^2/A^4", "the training target exactly: ||H_theta - H_r||_F^2 / (9 N^2)"),
     "base_freq_mae_low_cm": ("Double", "cm^-1", "the base model on the same frame"),
     "base_freq_mae_cm": ("Double", "cm^-1", "the base model on the same frame"),
     "base_hessian_mae": ("Double", "eV/A^2", "the base model on the same frame"),
     "base_eigval_mae_eckart": ("Double", "eV/A^2/amu", "the base model on the same frame"),
     "base_loss_cartesian": ("Double", "eV^2/A^4", "the base model on the same frame"),
     "n_anharmonic": ("Integer", None, "reference modes set aside from the entropy tier"),
-    "noise_floor_cm": ("Double", "cm^-1", "REF_NOISE_FLOOR_CM: the rigid block of the unprojected REFERENCE Hessian -- a low-mode difference below it is unresolved, not model error (S0-C-44)"),
+    "noise_floor_cm": ("Double", "cm^-1", "REF_NOISE_FLOOR_CM: the rigid block of the unprojected REFERENCE Hessian -- a low-mode difference below it is unresolved, not model error"),
     "has_hessian": ("Boolean", None, "the frame carries a Label Hessian (the H metrics above are - otherwise)"),
     "rms_displacement_A": ("Double", "A", "the frame's RMS displacement from its basin (0 for a basin frame)"),
     "rms_bin": ("String", None, "0 / <0.08 / <0.15 / >=0.15 (A): the reference row the frame belongs to"),
-    "held_out_generator": ("String", None, "yes when the frame's generator never trains (S0-C-54)"),
+    "held_out_generator": ("String", None, "yes when the frame's generator never trains"),
     "e_err_mev_per_atom": ("Double", "meV/atom", "engine: |E - E_ref| / N"),
     "f_rmse_mev_a": ("Double", "meV/A", "engine: RMSE of the force components against the Label"),
     "base_e_err_mev_per_atom": ("Double", "meV/atom", "the base model on the same frame"),
@@ -157,7 +158,7 @@ SCHEMA = {
         "N_FRAMES": ("Integer", None, "frames with a reference Hessian in those splits"),
         "N_MOLECULES": ("Integer", None, "molecules those frames came from"),
         "LOW_CUTOFF": ("Double", "cm^-1", "a reference mode below this is a low mode"),
-        "ANHARMONIC_CM": ("Double", "cm^-1", "below this a mode leaves the entropy tier (round-2 Q6)"),
+        "ANHARMONIC_CM": ("Double", "cm^-1", "below this a mode leaves the entropy tier"),
         "FD_SELF_CHECK_CM": ("Double", "cm^-1", "an along-mode self-check above this leaves it too"),
         "N_HESSIAN_FRAMES": ("Integer", None, "of the frames, those with a Label Hessian"),
         "N_HELD_OUT_FRAMES": ("Integer", None, "of the frames, those of a held-out generator (the reference rows)"),
@@ -168,7 +169,7 @@ SCHEMA = {
         "N_RAMP_MOLECULES": ("Integer", None, "molecules ramped"),
         "TRAIN_RECORD": ("String", None, "the fine-tune's train.toml whose validation curves head the report, or -"),
         "SECONDS": ("Double", "s", "wall time"),
-        "GATE_OPEN": ("Boolean", None, "false (S0-C-60, default): every row reported, nothing decided; true: the gate rows decide"),
+        "GATE_OPEN": ("Boolean", None, "false (the default): every row reported, nothing decided; true: the gate rows decide"),
         "VERDICT": ("String", None, "REPORTED when the gate is closed; with it open, PASS when every GATE row passed (the Hessian matrix against the Label vs base, in_distribution, forgetting), FAIL otherwise; the reference rows (low modes, entropy, RMS bins, MD ramp) never move it"),
     },
     "Distribution": {
@@ -296,7 +297,7 @@ def hessian_at(calc, atoms):
 
 
 def anharmonic_modes(omega_ref_cm, qid, basin, profiles=None):
-    """Reference modes the entropy tier must not be judged on (round-2 Q6 (a)): below
+    """Reference modes the entropy tier must not be judged on: below
     `ANHARMONIC_CM`, or with an along-mode finite-difference self-check above
     `FD_SELF_CHECK_CM` in `profiles` (a `mode_curvature` Record's rows, when one exists)."""
     out = []
@@ -315,14 +316,13 @@ def anharmonic_modes(omega_ref_cm, qid, basin, profiles=None):
 def distribution_of(qid, pinned=dataset_mod.PINNED, in_distribution=IN_DISTRIBUTION, molecule_split=None):
     """Which row of the judge's table this molecule belongs to. `in_distribution` wins
     over `out_of_molecule`: a pinned molecule MACE-OFF23 was trained on is not held out,
-    whatever the split says (S0-C-40).
+    whatever the split says.
 
     `molecule_split` is the index's column of the same name -- "test" when the WHOLE
-    molecule is held out. Under the by-molecule split (production since S0-C-65) every
+    molecule is held out. Under the whole-molecule split (the production default) every
     test frame belongs to such a molecule, so `interpolation` is empty by construction and
     the held-out rows are a generalisation reading; under the by-frame split a test frame
-    of a training molecule is `interpolation` (the same molecule, other conformers), which
-    is what round 5 Q4 traded away and S0-C-65 traded back."""
+    of a training molecule is `interpolation` (the same molecule, other conformers)."""
     if qid in in_distribution:
         return "in_distribution"
     if qid in pinned or str(molecule_split or "") == "test":
@@ -360,7 +360,7 @@ def frame_rows(dataset_dir, name, level, calc, base_calc=None, splits=("test",),
     """One row per labelled frame of `splits`: E and F errors of the engine and (when
     given) the base model on every frame, and `hessian_compare` plus eq. 1 exactly where
     the frame carries a Label Hessian (a held-out displaced frame carries E/F only and
-    still has a row: the reference bins of ticket 22 read it)."""
+    still has a row: the reference bins read it)."""
     from ase.io import read
     dataset_dir = Path(dataset_dir)
     classes, held, msplit = {}, {}, {}
@@ -479,7 +479,7 @@ def aggregate(rows):
 
 
 def aggregate_displacement(rows):
-    """The reference rows of ticket 22: every frame (Hessian or E/F-only) grouped by
+    """The reference rows: every frame (Hessian or E/F-only) grouped by
     (distribution, rms_bin) in bin order; H metrics over the Hessian frames of the bin, E
     and F over all of them; `GATE = no` on every row."""
     out = []
@@ -615,7 +615,7 @@ def basin_geometries(dataset_dir, level, molecules, splits=("test", "train", "va
 
 
 def training_curves(train_toml):
-    """The three validation curves of a fine-tune's Record (ticket 21), for the report's
+    """The three validation curves of a fine-tune's Record, for the report's
     header: rows (epoch, valid_energy, valid_forces, valid_hessian) of the valid split,
     and the Record's HESSIAN_CURVE_MOVED; ({}, []) when no Record."""
     path = Path(train_toml) if train_toml else None
@@ -658,8 +658,8 @@ def thermochemistry(root, tag, molecules, engine_level, reference_level, anharmo
 
 
 def forgetting(calc, base_calc, frames_file, energy_key="REF_energy", forces_key="REF_forces"):
-    """E and F RMSE of the engine and of the base model on a FIXED set of SPICE frames
-    (round-2 Q7's judge). Energies per atom, so molecules of different size compare."""
+    """E and F RMSE of the engine and of the base model on a FIXED set of SPICE frames.
+    Energies per atom, so molecules of different size compare."""
     from ase.io import read
     path = Path(frames_file)
     if not path.is_file():
@@ -701,7 +701,7 @@ def forgetting(calc, base_calc, frames_file, energy_key="REF_energy", forces_key
 
 def verdict(dist_rows, thermo_rows, forget_row, thresholds=None, noise_floor_cm=None, ramp_rows=None,
             disp_rows=None):
-    """One line per row. GATE rows (`GATE_ROWS`, S0-C-58/59) decide: the Hessian MATRIX
+    """One line per row. GATE rows (`GATE_ROWS`) decide: the Hessian MATRIX
     against the Label on the held-out Hessian frames -- ||H_theta - H_r||_F^2 / (9 N^2),
     the training target's own number -- engine against base (no worse); the
     in_distribution no-degradation; the forgetting line. REFERENCE rows
@@ -710,7 +710,7 @@ def verdict(dist_rows, thermo_rows, forget_row, thresholds=None, noise_floor_cm=
     own minima, the held-out generator's Hessian error against the base (the RMS bins),
     the MD ramp -- measured against their number, reported, never moving the verdict. A
     line with nothing to measure is `-`, never a silent PASS. The Label's grid noise
-    (S0-C-44) is printed beside the low-mode line: no threshold means anything below it."""
+    is printed beside the low-mode line: no threshold means anything below it."""
     t = dict(THRESHOLDS, **(thresholds or {}))
     lines = []
     held = [d for d in dist_rows if d["DISTRIBUTION"] in ("interpolation", "out_of_molecule")]
@@ -752,13 +752,13 @@ def verdict(dist_rows, thermo_rows, forget_row, thresholds=None, noise_floor_cm=
     else:
         lines.append(dict(LINE="forgetting", GATE="yes", VALUE=None, THRESHOLD=t["forgetting"], RESULT="-",
                           NOTE="no SPICE draw on disk (scripts/tooling/s0_spice_test_draw.py)"))
-    # --- reference rows (computed from the matrix afterwards; post-processing; S0-C-58/59) ---
+    # --- reference rows (computed from the matrix afterwards; post-processing) ---
     vals = [d["FREQ_MAE_LOW_CM"] for d in held if d.get("FREQ_MAE_LOW_CM") is not None]
     if vals:
         v = float(np.mean(vals))
         note = "reference: held-out low-mode MAE (< {:.0f} cm^-1 modes), computed from the matrix".format(LOW_CM)
         if noise_floor_cm:
-            note += "; the Label's own grid noise is ~{:.0f} cm^-1 (S0-C-44)".format(noise_floor_cm)
+            note += "; the Label's own grid noise is ~{:.0f} cm^-1".format(noise_floor_cm)
         lines.append(dict(LINE="held_out_low_mode_mae_cm", GATE="no", VALUE=v, THRESHOLD=t["low_mode_mae_cm"],
                           RESULT="PASS" if v <= t["low_mode_mae_cm"] else "FAIL", NOTE=note))
     errs = [abs(r["MODEL_ERROR_S_REF"]) for r in thermo_rows if r.get("MODEL_ERROR_S_REF") is not None]
@@ -789,14 +789,14 @@ def verdict(dist_rows, thermo_rows, forget_row, thresholds=None, noise_floor_cm=
     return lines
 
 
-#: the gate is CLOSED by default (S0-C-60): every row is reported against its number,
+#: the gate is CLOSED by default: every row is reported against its number,
 #: none decides; `judge.run(gate=True)` / `06_judge.py --gate` reopens it
 GATE_CLOSED = "REPORTED"
 
 
 def verdict_of(lines, gate=True):
     """With the gate open: PASS when every GATE row is PASS or '-', FAIL otherwise; a
-    reference row never moves it. With the gate closed (the default of `run`, S0-C-60):
+    reference row never moves it. With the gate closed (the default of `run`):
     `REPORTED` -- the rows carry their own PASS / FAIL and nothing is decided."""
     if not gate:
         return GATE_CLOSED
@@ -811,7 +811,7 @@ def run(root, tag, name, level, calc, engine_name, base_calc=None, base_engine=N
     bins, the MD ramp (`ramp`: a dict of `ramp_one` settings, None = not run;
     `ramp_molecules`: default the pinned molecules present), the verdict, and the Record
     under `<dataset>/judge/<run>/`. `train_record`: the fine-tune's train.toml whose
-    validation curves head the report. `gate`: False (S0-C-60, the default) reports every
+    validation curves head the report. `gate`: False (the default) reports every
     row and decides nothing (`VERDICT = REPORTED`); True lets the gate rows decide.
     `thermo_tag`: the tag whose molecule directories hold the engine's msRRHO Records (a
     fine-tuned engine has its own branch A under its own tag); default the campaign tag."""
@@ -911,7 +911,7 @@ def _write_report(path, out):
     curves = out.get("curves") or []
     if curves:
         ti = out.get("train_info") or {}
-        rep.section("the fine-tune's validation curves (ticket 21's Record: {})".format(info.get("TRAIN_RECORD")))
+        rep.section("the fine-tune's validation curves (train Record: {})".format(info.get("TRAIN_RECORD")))
         for k in ("VALID_PROBES", "HESSIAN_WEIGHT", "PT_N_FRAMES", "REPLAY_PER_HESSIAN_FRAME",
                   "STAGE_TWO_EPOCH", "HESSIAN_CURVE_MOVED", "N_EPOCHS"):
             if k in ti:
@@ -941,7 +941,7 @@ def _write_report(path, out):
                     r["N_ANHARMONIC"], r["SOURCE"]] for r in out["thermochemistry"]],
                   units=["", "cal/mol/K", "cal/mol/K", "", ""])
     if out["anharmonic"]:
-        rep.section("modes set aside from the entropy tier (round-2 Q6)")
+        rep.section("modes set aside from the entropy tier")
         rep.table(["molecule", "basin", "mode", "omega_ref", "reason"],
                   [[a["QM9_INDEX"], a["BASIN"], a["MODE"], _num(a["OMEGA_REF_CM"], "{:.2f}"), a["REASON"]]
                    for a in out["anharmonic"]], units=["", "", "", "cm^-1", ""])
@@ -950,7 +950,7 @@ def _write_report(path, out):
         for k, v in out["forgetting"].items():
             rep.kv(k, v if not isinstance(v, float) else round(v, 4))
     if out.get("displacement"):
-        rep.section("reference rows: the held-out generator's frames by RMS displacement (never gated; S0-C-54)")
+        rep.section("reference rows: the held-out generator's frames by RMS displacement (never gated)")
         rep.table(["distribution", "rms bin", "frames", "mols", "H frames", "H MAE", "MAE", "E MAE", "F RMSE",
                    "base H MAE", "base MAE", "base E MAE", "base F RMSE"],
                   [[d["DISTRIBUTION"], d["RMS_BIN"], d["N_FRAMES"], d["N_MOLECULES"], d["N_HESSIAN"],
@@ -968,7 +968,7 @@ def _write_report(path, out):
                     _num(r["FAIL_PS"], "{:.2f}"), _num(r["MAX_RATIO"], "{:.3f}"), _num(r["MIN_RATIO"], "{:.3f}"),
                     r["N_STEPS"], _num(r["SECONDS"], "{:.0f}")] for r in out["ramp"]],
                   units=["", "", "", "K", "ps", "", "", "", "s"])
-    rep.section("verdict (gate {}: {})".format("open -- the gate rows decide" if info.get("GATE_OPEN") else "CLOSED, S0-C-60",
+    rep.section("verdict (gate {}: {})".format("open -- the gate rows decide" if info.get("GATE_OPEN") else "CLOSED",
                                              "reference rows are reported" if info.get("GATE_OPEN") else "every row is reported, none decides"))
     rep.table(["line", "gate", "value", "threshold", "result", "note"],
               [[l["LINE"], l.get("GATE", "yes"), _num(l["VALUE"], "{:.4f}"), _num(l["THRESHOLD"], "{:.4f}"), l["RESULT"], l["NOTE"]]

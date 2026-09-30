@@ -1,4 +1,4 @@
-"""Ticket 14 of the Hessian-learning set: the judge on the REAL engine, with its two
+"""The judge on the REAL engine, with its two
 calibrations.
 
 INTEGRATION (engine, CPU). Builds a one-molecule Dataset from the 2-methyloxirane frame
@@ -12,10 +12,10 @@ itself:
   * must-FAIL: `ScaledCalculator(0.9)` -- every frequency 0.9x -- fails the low-mode line.
   * and the base model ITSELF fails the low-mode line on this molecule (12.7 cm^-1
     against the 8.5 threshold): 2-methyloxirane is an out-of-distribution ring, which is
-    where MACE-OFF23's curvature error lives (S0-C-41). A judge that passed it here would
+    where MACE-OFF23's curvature error lives. A judge that passed it here would
     not be measuring what the fine-tune is for.
 
-Ticket 22 (2026-09-22, S0-C-58/59): the gate is the Hessian MATRIX against the Label,
+The gate / reference split: the gate is the Hessian MATRIX against the Label,
 engine vs base (||dH||^2/(9N^2), the training target); the low-mode line and the entropy
 are computed from it and are reference rows, like the RMS bins and the MD ramp; the 0.9x
 potential (Hessian x0.81) FAILs the Hessian gate and the verdict, the base against itself
@@ -69,7 +69,7 @@ def main():
         d = Path(dataset_mod.datasets_dir(Path(tmp), "smoke", "smoke"))
         d.mkdir(parents=True)
         disp = frames.read_frames(FIX / "displaced.{}.extxyz".format(LEVEL))
-        for a in disp:                                             # held-out frames: E/F labels only (S0-C-54)
+        for a in disp:                                             # held-out frames: E/F labels only
             a.info.pop("hessian", None)
         dataset._write_split(d / "test.{}.extxyz".format(LEVEL), [(a, "test") for a in ref] + [(a, "test") for a in disp],
                              reference=True)
@@ -116,20 +116,20 @@ def main():
         ramp = dict(max_K=20.0, step_K=5.0, step_ps=0.05, seed=1)        # 4 stages x 50 steps: the machinery, not the physics
         closed = judge.run(Path(tmp), "smoke", "smoke", LEVEL, calc, name, base_calc=calc, base_engine=name,
                            run_name="base_closed", splits=("test",), write=True)
-        check("the default judge run has the gate CLOSED (S0-C-60): VERDICT = REPORTED, GATE_OPEN false, every row still carries its result",
+        check("the default judge run has the gate CLOSED: VERDICT = REPORTED, GATE_OPEN false, every row still carries its result",
               closed["info"]["VERDICT"] == "REPORTED" and closed["info"]["GATE_OPEN"] is False
               and {l["LINE"]: l["RESULT"] for l in closed["verdict"]}["held_out_low_mode_mae_cm"] == "FAIL"
               and "CLOSED" in (closed["run_dir"] / "judge.out").read_text(encoding="utf-8"), closed["info"]["VERDICT"])
         out = judge.run(Path(tmp), "smoke", "smoke", LEVEL, calc, name, base_calc=calc, base_engine=name,
                         run_name="base", splits=("test",), write=True, ramp=ramp, gate=True)
         lines = {l["LINE"]: l for l in out["verdict"]}
-        # The must-pass of the ticket is the NO-DEGRADATION line (base against base) and
+        # The must-pass here is the NO-DEGRADATION line (base against base) and
         # the self-label zero above -- NOT the low-mode line. On this molecule the base
         # model FAILS the low-mode line at 12.7 cm^-1 against the 8.5 threshold, and that
         # is the judge working: 2-methyloxirane is an out-of-distribution ring, exactly
-        # where MACE-OFF23's curvature error lives (S0-C-41: -57 cm^-1 on the lowest mode
-        # of one of the three rings). A judge that passed the base model here would be
-        # measuring nothing the fine-tune is for. Since ticket 22 that line is a REFERENCE
+        # where MACE-OFF23's curvature error lives (-57 cm^-1 on the lowest mode
+        # of one of the pinned rings). A judge that passed the base model here would be
+        # measuring nothing the fine-tune is for. The low-mode line is a REFERENCE
         # row: reported, never in the verdict.
         check("must-pass: judged against ITSELF the Hessian gate reads exactly 0 (ratio - 1), no gate row FAILs, VERDICT PASS",
               abs(lines["held_out_hessian_cartesian"]["VALUE"]) < 1e-12 and lines["held_out_hessian_cartesian"]["GATE"] == "yes"
@@ -176,7 +176,7 @@ def main():
                         base_calc=calc, base_engine=name, run_name="base_x0.9", splits=("test",),
                         scale=0.9, write=True, ramp=None, gate=True)
         blines = {l["LINE"]: l for l in bad["verdict"]}
-        check("must-fail: the 0.9x-scaled potential (Hessian x0.81) FAILs the Hessian GATE row and the VERDICT (S0-C-59); "
+        check("must-fail: the 0.9x-scaled potential (Hessian x0.81) FAILs the Hessian GATE row and the VERDICT; "
               "its low-mode reference row reads FAIL too",
               blines["held_out_hessian_cartesian"]["RESULT"] == "FAIL" and blines["held_out_hessian_cartesian"]["VALUE"] > 1.0
               and blines["held_out_low_mode_mae_cm"]["RESULT"] == "FAIL" and blines["held_out_low_mode_mae_cm"]["GATE"] == "no"

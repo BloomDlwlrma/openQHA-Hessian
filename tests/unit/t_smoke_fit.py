@@ -1,4 +1,4 @@
-"""Ticket 15 of the Hessian-learning set: the fit set, the epoch-0 balance and the replay
+"""The fit set, the epoch-0 balance and the replay
 arithmetic -- no engine (a fake calculator answers with stored Hessians).
 
 Asserted: `build_fit_dataset` re-splits labelled frames by frame, marks `PURPOSE = fit`

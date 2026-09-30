@@ -1,6 +1,6 @@
 """The Hessian-vector product of a MACE model by automatic differentiation (eq. 9).
 
-PRODUCTION. Ticket 10 of the Hessian-learning set.
+PRODUCTION.
 
     H v = grad_x (grad_x E . v) = -grad_x (F . v)
 
@@ -10,15 +10,15 @@ mace's forward does whenever it is called with `training=True` -- and the positi
 tensor those forces were differentiated against, which is `batch["positions"]` after the
 forward (mace sets `requires_grad_` on it in place). So the model's forward is NOT
 changed: T03 section 10 took the HVP this way from the unmodified MACE-OFF23_medium graph
-and it agreed with a column of the shipped `get_hessian()` to 1.4e-14 eV/A^2. The design's
-`compute_hessian_vector_products` in `mace/modules/utils.py` and the `hessian_probes`
-argument of the forwards were therefore never written; this module is where they went.
+and it agreed with a column of the shipped `get_hessian()` to 1.4e-14 eV/A^2. mace has no
+`compute_hessian_vector_products` in `mace/modules/utils.py` and its forwards take no
+`hessian_probes` argument: this module is where the HVP lives.
 
 Two modes, one function:
 
   * `create_graph=False` (inference, the ruler, the acceptance tests): the result is a
     plain tensor, the graph is dropped -- memory of one backward pass, whatever `k` is.
-  * `create_graph=True` (training, ticket 11's loss): the result carries a third-order
+  * `create_graph=True` (training, the loss): the result carries a third-order
     graph back to the parameters, so a loss built from it has a gradient (eq. 12).
 
 A batch is block-diagonal: structures in a batch are disconnected graphs, so one backward
@@ -88,8 +88,8 @@ def hessian_vector_products(model, batch_dict, probes, training=False, compute_s
 
 
 def hvp_from_atoms(calculator, atoms, probes):
-    """The design's `get_hessian_vector_products`, outside mace: `H v_j` for Cartesian
-    probes `[k, N, 3]` (or `[k, 3N]`) at `atoms`, as a numpy array `[k, N, 3]` in eV/A^2.
+    """`H v_j` for Cartesian probes `[k, N, 3]` (or `[k, 3N]`) at `atoms`, as a numpy
+    array `[k, N, 3]` in eV/A^2 -- the same columns `get_hessian` carries, outside mace.
     Inference: no graph is kept. Uses the calculator's own batching so the neighbour
     list, dtype and device are exactly `get_hessian`'s."""
     model = calculator.models[0]

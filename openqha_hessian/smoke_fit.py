@@ -1,4 +1,4 @@
-"""The smoke fit: what the campaign's settings are measured from (ticket 15).
+"""The smoke fit: what the campaign's settings are measured from.
 
 PRODUCTION, but its numbers are NOT a claim about generalisation. A fit Dataset drops the
 pinned rule and splits the same molecules' frames by frame, so every number out of it is
@@ -7,18 +7,18 @@ on every row). What it is for:
 
   the balance     `w_H` such that `w_H L_H = w_F L_F` on the BASE model at epoch 0. The
                   Cartesian 0.25-0.30 band of PHL / Rodriguez does not transfer under mass
-                  weighting (design section 2.6), so the weight is measured, not quoted.
+                  weighting, so the weight is measured, not quoted.
   the cost        seconds per epoch for each probe setting, against the E/F loss: the
-                  design's `(2 + 2k)` against `(2 + 6N)` claim, in seconds.
-  the ceiling     what `probe = modes` (the exact loss, eq. 10) reaches, so the sampled
-                  runs are read against something.
+                  `(2 + 2k)` against `(2 + 6N)` cost claim, in seconds.
+  the ceiling     what the exact loss (the deterministic `3N` probes) reaches, so the
+                  sampled runs are read against something.
   the replay      how many SPICE frames per Hessian-labelled frame a `--num_samples_pt`
                   buys HERE -- the number the campaign's choice is scaled from. The same
-                  flag means 152 on the smoke set and 0.17 on the campaign (ticket 15's
-                  arithmetic), so a replay setting quoted without this ratio says nothing.
+                  flag means 152 on the smoke set and 0.17 on the campaign, so a replay
+                  setting quoted without this ratio says nothing.
 
-Nothing here decides anything: it measures, writes the numbers down, and the settings are
-the user's ruling.
+Nothing here decides anything: it measures, writes the numbers down, and the settings
+stay the user's call.
 """
 import time
 from pathlib import Path
@@ -92,7 +92,7 @@ def build_fit_dataset(source_dir, level, out_dir, name, seed=0, valid_fraction=0
 
 
 def replay_ratio(n_train, n_hessian, num_samples_pt):
-    """What a `--num_samples_pt` actually buys, in frames (ticket 15's arithmetic).
+    """What a `--num_samples_pt` actually buys, in frames.
 
     mace concatenates the two heads' training sets and shuffles, so every frame of either
     head is seen once per epoch: the ratio is set by dataset size, NOT by a step loop as
@@ -113,7 +113,7 @@ def epoch_zero_balance(calc, train_file, energy_weight=1.0, forces_weight=100.0,
 
     `L_E` and `L_F` are mace's per-config-weighted squared errors as the loss computes
     them (energy per atom, forces per component); `L_H` is the target EXACTLY -- the full
-    matrix, eq. 1' (S0-C-64: there is one target) -- averaged over the frames that carry a
+    matrix, eq. 1', the one target -- averaged over the frames that carry a
     Label.
     Returns the terms and `w_H = w_F L_F / L_H`, the weight at which the Hessian term
     enters with the same gradient share as the forces at epoch 0.
