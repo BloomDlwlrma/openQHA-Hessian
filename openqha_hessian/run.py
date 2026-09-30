@@ -27,7 +27,7 @@ threshold` is emitted as 0, because its default 0.1 silently duplicates the fine
 frames whenever they are fewer than a tenth of the replay. The Record counts the file's
 frames (`PT_N_FRAMES`), reads their `config_weight` (`PT_CONFIG_WEIGHT`), parses both
 heads' counts from mace's log and prints the ratio as replay frames per Hessian frame
-(`REPLAY_PER_HESSIAN_FRAME`), the number the scan rows R0-R4 are defined by. mace takes
+(`REPLAY_PER_HESSIAN_FRAME`), the number the S0 scan rows R0-R4 were defined by. mace takes
 `--valid_fraction` of the replay file for the pretraining head's OWN validation unless
 `--pt_valid_file` names one; the draw tool writes that companion file and it is passed.
 
@@ -151,7 +151,7 @@ SCHEMA = {
         "PT_HEAD_VALID": ("Integer", None, "mace's count of pretraining-head validation frames (-1 when not logged)"),
         "FT_HEAD_TRAIN": ("Integer", None, "mace's count of fine-tuning-head training frames (-1 when not logged)"),
         "FT_HEAD_VALID": ("Integer", None, "mace's count of fine-tuning-head validation frames (-1 when not logged)"),
-        "REPLAY_PER_HESSIAN_FRAME": ("Double", None, "PT_N_FRAMES / N_TRAIN_HESSIAN: the Replay's size as the scan rows define it (0 without a Replay)"),
+        "REPLAY_PER_HESSIAN_FRAME": ("Double", None, "PT_N_FRAMES / N_TRAIN_HESSIAN: the Replay's size as the S0 scan rows define it (0 without a Replay)"),
         "REAL_PT_DATA_RATIO_THRESHOLD": ("Double", None, "mace's duplication threshold, always 0 here (never duplicate the fine-tune frames)"),
         "VALID_HESSIAN_EXACT_BEFORE": ("Double", "eV^2/A^4", "the EXACT Hessian term on the validation file for the BASE model, from the full matrix; -1 when not measured"),
         "VALID_HESSIAN_EXACT_AFTER": ("Double", "eV^2/A^4", "the same quantity for the fine-tuned model: the pair says what the run moved on the target, with no estimator noise; -1 when not measured"),
@@ -804,7 +804,7 @@ def _write_report(path, info, epochs):
               "REAL_PT_DATA_RATIO_THRESHOLD"):
         rep.kv(k, info.get(k))
     if info.get("MULTIHEADS"):
-        rep.note("REPLAY_PER_HESSIAN_FRAME = PT_N_FRAMES / N_TRAIN_HESSIAN is the Replay's size as the scan rows "
+        rep.note("REPLAY_PER_HESSIAN_FRAME = PT_N_FRAMES / N_TRAIN_HESSIAN is the Replay's size as the S0 scan rows "
                  "R0-R4 define it (R1 ~ 0.3, R2 ~ 1, R3 ~ 4 on draw300); the same file is a different ratio on "
                  "every Dataset. The counts PT_HEAD_* / FT_HEAD_* are mace's own, parsed from its log, and equal "
                  "the files' because the duplication threshold is 0.")
