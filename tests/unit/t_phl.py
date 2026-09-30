@@ -48,7 +48,7 @@ def main():
     H_t = np.load(FIX / "mace" / "basin00" / "hessian_at_{}.npy".format(LEVEL))
     n3 = 3 * len(symbols)
 
-    # === PHL verbatim: the target, the probes, the estimator (spec step 2) ==================
+    # === PHL verbatim: the target, the probes, the estimator =================================
     # --- eq. 1': the exact target ------------------------------------------------------------
     L = phl.loss_full(H_t, H_r)
     d = H_t - H_r

@@ -123,7 +123,7 @@ SCHEMA = {
         "BALANCE_L_H": ("Double", None, "the base model's Cartesian Hessian loss ||dH||^2/(9N^2) on the train file's Hessian frames (balance rule only, else 0)"),
         "PROBE": ("String", None, "gaussian (PHL's Algorithm 1, the default) / rademacher / cartesian (Algorithm 2): the training probes"),
         "N_PROBES": ("Integer", None, "probes per structure per step (k of eq. 6)"),
-        "VALID_PROBES": ("String", None, "the validation estimator: fixed per frame, drawn by the Dataset and stored with the frame"),
+        "VALID_PROBES": ("String", None, "the validation estimator: k fixed probes per frame, stored by the Dataset"),
         "MAX_NUM_EPOCHS": ("Integer", None, "epochs asked for"),
         "N_EPOCHS": ("Integer", None, "epochs the log holds"),
         "BATCH_SIZE": ("Integer", None, "structures per step"),
@@ -577,7 +577,7 @@ def validation_curves(epochs):
 
 def curve_moved(points, tol=FLAT_CURVE_TOL):
     """False when the curve has fewer than two points or its range is below `tol` of its
-    magnitude: the term did not act (a flat Hessian curve means the term was not in the loss)."""
+    magnitude: the Hessian term did not act (replaced in multihead mode, w_H 0, or a one-epoch run)."""
     vals = [v for _e, v in points]
     if len(vals) < 2:
         return False

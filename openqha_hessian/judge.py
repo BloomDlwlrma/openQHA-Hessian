@@ -21,7 +21,7 @@ What one judge run reports:
                    seven and, under the whole-molecule split (the production default),
                    every drawn test molecule -- so this is the generalisation reading the
                    gate row rests on),
-                   `interpolation` (a test frame of a TRAINING molecule: only the by-frame
+                   `interpolation` (a test frame of a TRAINING molecule: only the per-frame
                    split of the smoke / fit Datasets produces one; empty in production)
                    and `in_distribution` (the shipped molecules, which MACE-OFF23 did see)
   anharmonic       reference modes the entropy tier must not be judged on:
@@ -321,7 +321,7 @@ def distribution_of(qid, pinned=dataset_mod.PINNED, in_distribution=IN_DISTRIBUT
     `molecule_split` is the index's column of the same name -- "test" when the WHOLE
     molecule is held out. Under the whole-molecule split (the production default) every
     test frame belongs to such a molecule, so `interpolation` is empty by construction and
-    the held-out rows are a generalisation reading; under the by-frame split a test frame
+    the held-out rows are a generalisation reading; under the per-frame split a test frame
     of a training molecule is `interpolation` (the same molecule, other conformers)."""
     if qid in in_distribution:
         return "in_distribution"
@@ -823,7 +823,7 @@ def run(root, tag, name, level, calc, engine_name, base_calc=None, base_engine=N
                                   splits=splits, progress=progress)
     if not rows:
         # A judge with nothing to judge must not answer PASS. The most common cause is a
-        # Dataset that has no labelled frames in these splits (a by-molecule smoke set
+        # Dataset that has no labelled frames in these splits (a whole-molecule smoke set
         # puts them all in `test`, a fresh campaign in `pool`), or a path that is not a
         # Dataset directory at all.
         raise ValueError(
