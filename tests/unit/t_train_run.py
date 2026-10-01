@@ -267,11 +267,35 @@ def main():
     except TypeError as exc:
         check("run_training refuses num_samples_pt with the draw tool named", "s0_spice_pt_draw" in str(exc))
 
+    # --- the balance helper's pass-through (no engine: the calculator and the balance are patched) --
+    from openqha_hessian import smoke_fit as sf
+    calls = []
+    real_calc, real_balance = engine.calculator, sf.epoch_zero_balance
+
+    def fake_balance(calc, train_file, **kw):
+        calls.append(dict(kw))
+        return dict(PROBE=kw.get("probe"), N_PROBES=kw.get("n_probes"), L_E=1.0, L_F=2.0, L_H=0.5,
+                    HESSIAN_WEIGHT_BALANCED=400.0)
+
+    engine.calculator = lambda device="cpu", name=None: (object(), name, {})
+    sf.epoch_zero_balance = fake_balance
+    try:
+        b = train_run.hessian_weight_balance("MACE-OFF23_medium", "tr.xyz", probe="rademacher", n_probes=7, seed=42)
+        b_def = train_run.hessian_weight_balance("MACE-OFF23_medium", "tr.xyz")
+    finally:
+        engine.calculator, sf.epoch_zero_balance = real_calc, real_balance
+    check("hessian_weight_balance passes the run's probe kind, k and seed through to epoch_zero_balance "
+          "(explicit rademacher k=7 seed=42; defaults gaussian k=4 seed=123)",
+          [(c.get("probe"), c.get("n_probes"), c.get("seed")) for c in calls] == [("rademacher", 7, 42), ("gaussian", 4, 123)]
+          and (b["PROBE"], b["N_PROBES"]) == ("rademacher", 7) and b_def["N_PROBES"] == 4,
+          (calls, (b["PROBE"], b["N_PROBES"])))
+
     # --- the Record's schema covers what run_training writes ---------------------------------------
     written = {"RUN", "TAG", "NAME", "LEVEL", "DATASET_DIR", "INDEX_FILE", "TRAIN_FILE", "VALID_FILE",
                "N_TRAIN", "N_TRAIN_HESSIAN", "N_VALID", "N_VALID_HESSIAN", "FOUNDATION_MODEL",
                "FOUNDATION_FILE", "CONFIG_FILE", "CONFIG_SHA256",
                "LOSS", "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "PROBE", "N_PROBES",
+               "BALANCE_PROBE", "BALANCE_N_PROBES",
                "VALID_PROBES", "MAX_NUM_EPOCHS", "BATCH_SIZE", "SEED", "DEVICE", "DTYPE",
                "MULTIHEADS", "PT_TRAIN_FILE", "PT_VALID_FILE", "PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN",
                "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID", "REPLAY_PER_HESSIAN_FRAME",
@@ -286,6 +310,13 @@ def main():
     check("every key run_training writes is in the schema", written <= schema, sorted(written - schema))
     check("the stale NUM_SAMPLES_PT key is gone from the schema; the four PT_* keys are there",
           "NUM_SAMPLES_PT" not in schema and {"PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN", "FT_HEAD_TRAIN"} <= schema)
+    sc = train_run.SCHEMA["Calculation_Info"]
+    check("the balance provenance fields are typed and the amended descriptions carry the estimator reading "
+          "(measured under the run's probe setting; pre-amendment Records hold the exact full-matrix value)",
+          sc["BALANCE_PROBE"][0] == "String" and sc["BALANCE_N_PROBES"][0] == "Integer"
+          and "probe setting" in sc["HESSIAN_WEIGHT_RULE"][2] and "BALANCE_PROBE" in sc["HESSIAN_WEIGHT_RULE"][2]
+          and "probe setting" in sc["BALANCE_L_H"][2] and "before the estimator amendment" in sc["BALANCE_L_H"][2],
+          (sc.get("BALANCE_PROBE"), sc.get("BALANCE_N_PROBES")))
     check("the retired weight-identity keys are gone from the schema",
           not {"FOUNDATION_PARAMS_SHA256", "MODEL_PARAMS_SHA256", "MODEL_N_TENSORS", "ENGINE_PARAMS_SHA256"} & schema)
 
@@ -330,7 +361,7 @@ def main():
               (Path(td) / "train.out").is_file() and (Path(td) / "train.dat").is_file()
               and "did not move" in (Path(td) / "train.out").read_text(encoding="utf-8"))
 
-    print("\n{} checks, {} failed".format(41, len(FAIL)))
+    print("\n{} checks, {} failed".format(46, len(FAIL)))
     return 1 if FAIL else 0
 
 

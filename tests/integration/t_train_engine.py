@@ -110,6 +110,10 @@ def main():
               and (out["info"]["N_VALID"], out["info"]["N_VALID_HESSIAN"]) == (2, 2)
               and out["info"]["PT_N_FRAMES"] == 0 and out["info"]["REPLAY_PER_HESSIAN_FRAME"] == 0.0
               and out["info"]["VALID_PROBES"] == phl_loss.VALID_PROBES_LABEL, out["info"])
+        check("dry run: a numeric w_H is the given rule, so the balance provenance fields are the does-not-apply pair",
+              out["info"]["HESSIAN_WEIGHT_RULE"] == "given" and out["info"]["BALANCE_PROBE"] == "-"
+              and out["info"]["BALANCE_N_PROBES"] == 0 and out["info"]["BALANCE_L_H"] == 0.0,
+              (out["info"]["HESSIAN_WEIGHT_RULE"], out["info"].get("BALANCE_PROBE")))
         check("dry run: the info the tests read carries the package identity too",
               "HL_PACKAGE_VERSION" in out["info"] and "HL_PACKAGE_COMMIT" in out["info"], sorted(out["info"]))
         check("dry run writes no model", not (out["run_dir"] / "cart4.model").is_file())
@@ -234,6 +238,16 @@ def main():
               mi["HESSIAN_WEIGHT_RULE"] == "balance" and mi["BALANCE_L_H"] > 0
               and abs(mi["HESSIAN_WEIGHT"] - 100.0 * mi["BALANCE_L_F"] / mi["BALANCE_L_H"]) < 1e-9
               and abs(mi["SWA_HESSIAN_WEIGHT"] - mi["HESSIAN_WEIGHT"]) < 1e-12, (mi["HESSIAN_WEIGHT"], mi["BALANCE_L_F"], mi["BALANCE_L_H"]))
+        bal_re = train_run.hessian_weight_balance("MACE-OFF23_medium", mi["TRAIN_FILE"],
+                                                  probe="gaussian", n_probes=4, seed=7)
+        check("... and the Record names the estimator (BALANCE_PROBE gaussian, BALANCE_N_PROBES 4 = the run's probe "
+              "setting) and BALANCE_L_H reproduces a direct estimator recomputation (1e-12 rel: {:.6e} vs {:.6e})".format(
+                  bal_re["L_H"], mi["BALANCE_L_H"]),
+              (mi["BALANCE_PROBE"], mi["BALANCE_N_PROBES"]) == ("gaussian", 4)
+              and (mi["BALANCE_PROBE"], mi["BALANCE_N_PROBES"]) == (mi["PROBE"], mi["N_PROBES"])
+              and abs(bal_re["L_H"] - mi["BALANCE_L_H"]) <= 1e-12 * abs(bal_re["L_H"])
+              and abs(bal_re["HESSIAN_WEIGHT_BALANCED"] - mi["HESSIAN_WEIGHT"]) <= 1e-12 * abs(mi["HESSIAN_WEIGHT"]),
+              (mi.get("BALANCE_PROBE"), mi.get("BALANCE_N_PROBES"), bal_re["L_H"], mi["BALANCE_L_H"]))
         check("a multihead run completes and the Record says so: PT_N_FRAMES 2, PT_CONFIG_WEIGHT 3.0, 1 Replay frame per Hessian frame",
               mi["MULTIHEADS"] is True and mi["PT_TRAIN_FILE"] == str(pt) and mi["PT_VALID_FILE"] == str(pt_valid)
               and Path(mi["MODEL_FILE"]).is_file() and mi["PT_N_FRAMES"] == 2 and mi["PT_CONFIG_WEIGHT"] == "3.0"
@@ -295,7 +309,7 @@ def main():
         check("the stock loss trains on the same files (the default path is untouched)",
               (plain / "plain.model").is_file() or list(plain.glob("*.model")))
 
-    print("\n{} checks, {} failed".format(30, len(FAIL)))
+    print("\n{} checks, {} failed".format(32, len(FAIL)))
     print("PASS" if not FAIL else "FAIL")
     return 1 if FAIL else 0
 

@@ -33,8 +33,9 @@ heads' counts from mace's log and prints the ratio as replay frames per Hessian 
 
 THE WEIGHT. `hessian_weight="balance"` makes the driver measure, on the BASE
 model and the run's own train file before the first step, the epoch-0 balance
-`w_H = w_F L_F / L_H` with `L_H` the Cartesian target, the full matrix
-(`smoke_fit.epoch_zero_balance`) and train with that value; the Record keeps the rule, the
+`w_H = w_F L_F / L_H` with `L_H` measured under the run's probe setting
+(`smoke_fit.epoch_zero_balance`; `BALANCE_PROBE` / `BALANCE_N_PROBES` in the Record name
+the estimator) and train with that value; the Record keeps the rule, the
 three terms and the resolved `HESSIAN_WEIGHT`. A number is used as given.
 
 THE CONTROL (the base's recipe, MACE-OFF23): every flag that steers the loop
@@ -117,10 +118,12 @@ SCHEMA = {
         "ENERGY_WEIGHT": ("Double", None, "w_E of eq. 11 (Stage One)"),
         "FORCES_WEIGHT": ("Double", None, "w_F of eq. 11 (Stage One)"),
         "HESSIAN_WEIGHT": ("Double", None, "w_H of eq. 11 (Stage One); the resolved value when the rule is balance"),
-        "HESSIAN_WEIGHT_RULE": ("String", None, "given (a number on the command line) or balance (w_F L_F / L_H on the base model over the train file, Cartesian L_H)"),
+        "HESSIAN_WEIGHT_RULE": ("String", None, "given (a number on the command line) or balance (w_F L_F / L_H on the base model over the train file, L_H measured with the run's probe setting -- BALANCE_PROBE / BALANCE_N_PROBES name the estimator; the exact full-matrix reading stays the job of the anchors and the judge)"),
         "BALANCE_L_E": ("Double", None, "the base model's per-atom energy MSE on the train file (balance rule only, else 0)"),
         "BALANCE_L_F": ("Double", None, "the base model's force MSE on the train file (balance rule only, else 0)"),
-        "BALANCE_L_H": ("Double", None, "the base model's Cartesian Hessian loss ||dH||^2/(9N^2) on the train file's Hessian frames (balance rule only, else 0)"),
+        "BALANCE_L_H": ("Double", None, "the base model's Hessian loss ||dH||^2/(9N^2) on the train file's Hessian frames, measured with the run's probe setting (BALANCE_PROBE / BALANCE_N_PROBES; balance rule only, else 0); Records written before the estimator amendment hold the exact full-matrix reading"),
+        "BALANCE_PROBE": ("String", None, "the estimator behind BALANCE_L_H: the run's probe setting (gaussian / rademacher / cartesian); - when the rule is given"),
+        "BALANCE_N_PROBES": ("Integer", None, "probes per frame behind BALANCE_L_H (k of the estimator; 0 for the exact cartesian path or when the rule is given)"),
         "PROBE": ("String", None, "gaussian (PHL's Algorithm 1, the default) / rademacher / cartesian (Algorithm 2): the training probes"),
         "N_PROBES": ("Integer", None, "probes per structure per step (k of eq. 6)"),
         "VALID_PROBES": ("String", None, "the validation estimator: k fixed probes per frame, stored by the Dataset"),
@@ -311,14 +314,16 @@ def control_settings(max_epochs, lr=None, scheduler_patience=DEFAULT_SCHEDULER_P
     )
 
 
-def hessian_weight_balance(foundation_name, train_file, energy_weight=1.0, forces_weight=100.0, device="cpu"):
-    """The epoch-0 balance on the BASE model over `train_file` with the Cartesian target
-    (`smoke_fit.epoch_zero_balance`): w_H = w_F L_F / L_H. Refuses a train file without a
+def hessian_weight_balance(foundation_name, train_file, energy_weight=1.0, forces_weight=100.0,
+                           probe="gaussian", n_probes=4, seed=123, device="cpu"):
+    """The epoch-0 balance on the BASE model over `train_file` (`smoke_fit.epoch_zero_balance`):
+    w_H = w_F L_F / L_H, with `L_H` measured under the run's probe setting (`probe`, `n_probes`,
+    `seed`; `cartesian` is the exact full-matrix path). Refuses a train file without a
     Hessian frame (there is nothing to balance against)."""
     from . import smoke_fit
     calc, _name, _prov = engine.calculator(device=device, name=foundation_name)
     b = smoke_fit.epoch_zero_balance(calc, train_file, energy_weight=energy_weight, forces_weight=forces_weight,
-                                     probe="cartesian")
+                                     probe=probe, n_probes=n_probes, seed=seed)
     if not b["HESSIAN_WEIGHT_BALANCED"]:
         raise ValueError("no Hessian frame in {} (or L_H = 0): the balance rule has nothing to balance".format(train_file))
     return b
@@ -610,7 +615,11 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
     if str(settings.get("hessian_weight", 1.0)) == "balance":
         rule = "balance"
         balance = hessian_weight_balance(foundation_name, files["train"], settings.get("energy_weight", 1.0),
-                                         settings.get("forces_weight", 100.0), settings.get("device", "cpu"))
+                                         settings.get("forces_weight", 100.0),
+                                         probe=settings.get("probe", "gaussian"),
+                                         n_probes=settings.get("n_probes", 4),
+                                         seed=settings.get("seed", 123),
+                                         device=settings.get("device", "cpu"))
         settings["hessian_weight"] = balance["HESSIAN_WEIGHT_BALANCED"]
     argv = mace_argv(files["train"], files["valid"], run, run_dir, foundation_path, level, **settings)
     config_file = run_dir / "config.yaml"
@@ -649,6 +658,7 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
         HESSIAN_WEIGHT_RULE=rule,
         BALANCE_L_E=float(balance["L_E"] or 0.0), BALANCE_L_F=float(balance["L_F"] or 0.0),
         BALANCE_L_H=float(balance["L_H"] or 0.0),
+        BALANCE_PROBE=str(balance.get("PROBE", "-")), BALANCE_N_PROBES=int(balance.get("N_PROBES", 0)),
         PROBE=str(settings.get("probe", "gaussian")),
         N_PROBES=int(settings.get("n_probes", 4)),
         VALID_PROBES=phl_loss.VALID_PROBES_LABEL,
@@ -793,11 +803,14 @@ def _write_report(path, info, epochs):
                      "-" if _record_num(info, "VALID_HESSIAN_PROBE_LAST") < 0 else "{:.4e}".format(_record_num(info, "VALID_HESSIAN_PROBE_LAST")),
                      "-" if _record_num(info, "VALID_PROBE_OFFSET_RUN") < 0 else "{:.1%}".format(_record_num(info, "VALID_PROBE_OFFSET_RUN"))))
     for k in ("LOSS", "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "HESSIAN_WEIGHT_RULE",
-              "BALANCE_L_E", "BALANCE_L_F", "BALANCE_L_H", "PROBE", "N_PROBES", "VALID_PROBES"):
+              "BALANCE_L_E", "BALANCE_L_F", "BALANCE_L_H", "BALANCE_PROBE", "BALANCE_N_PROBES",
+              "PROBE", "N_PROBES", "VALID_PROBES"):
         rep.kv(k, info.get(k))
     if info.get("HESSIAN_WEIGHT_RULE") == "balance":
         rep.note("HESSIAN_WEIGHT = FORCES_WEIGHT x BALANCE_L_F / BALANCE_L_H: the Hessian term enters the epoch-0 gradient "
-                 "with the force term's share on the base model (T05, section 4).")
+                 "with the force term's share on the base model (T05, section 4); BALANCE_L_H was measured with the run's "
+                 "probe setting ({} k={}) -- the exact full-matrix reading is the anchors' and the judge's job.".format(
+                     info.get("BALANCE_PROBE"), info.get("BALANCE_N_PROBES")))
     rep.section("the Replay")
     for k in ("MULTIHEADS", "PT_TRAIN_FILE", "PT_VALID_FILE", "PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN",
               "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID", "REPLAY_PER_HESSIAN_FRAME",
