@@ -361,7 +361,7 @@ def main():
               (Path(td) / "train.out").is_file() and (Path(td) / "train.dat").is_file()
               and "did not move" in (Path(td) / "train.out").read_text(encoding="utf-8"))
 
-    print("\n{} checks, {} failed".format(46, len(FAIL)))
+    print("\n{} checks, {} failed".format(42, len(FAIL)))
     return 1 if FAIL else 0
 
 
