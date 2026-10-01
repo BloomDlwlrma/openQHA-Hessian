@@ -87,12 +87,19 @@ def main():
         check("mace_argv refuses num_samples_pt", True)
     extra = train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", extra=["--clip_grad", "1.0"])
     check("--mace-arg passes through as given", extra[-2:] == ["--clip_grad", "1.0"])
+    extra_eq = train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", extra=["--clip_grad=1.0"])
+    ep = train_run.argv_pairs(extra_eq)
+    check("a single --key=value extra reads back as a pair (config.yaml truth)",
+          extra_eq[-1] == "--clip_grad=1.0" and ep.get("clip_grad") == "1.0" and "clip_grad=1.0" not in ep, ep)
+    check("a --key=value token splits at its first = only (= kept in the value, empty allowed)",
+          train_run.argv_pairs(["--a=1", "--b=x=y", "--c", "--d="]) == {"a": "1", "b": "x=y", "c": True, "d": ""})
     # --- the control -------------------------------------------------------------------------------
     pc = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", max_epochs=100, hessian_weight=0.02,
                                    forces_weight=100.0))
     check("the control defaults: lr 0.01, scheduler_patience 20, patience 50, eval_interval 1, ema, swa at 75, swa_lr 0.00025",
           (pc["--lr"], pc["--scheduler_patience"], pc["--patience"], pc["--eval_interval"]) == ("0.01", "20", "50", "1")
           and pc["--ema"] is True and pc["--swa"] is True and pc["--start_swa"] == "75" and pc["--swa_lr"] == "0.00025", pc)
+    check("--ema_decay rides with --ema (mace's default 0.99)", pc["--ema_decay"] == "0.99", pc.get("--ema_decay"))
     check("the Stage Two weights: 1000 / 100 and w_H^(2) = 0.02 x 100 / 100 = 0.02",
           (pc["--swa_energy_weight"], pc["--swa_forces_weight"], pc["--swa_hessian_weight"]) == ("1000.0", "100.0", "0.02"), pc)
     check("no --hessian_mode_weighting is emitted: fork commit D took it out of the parser",
@@ -103,6 +110,42 @@ def main():
     check("start_swa is at least 1 (max_epochs 1); an explicit swa_hessian_weight wins",
           train_run.control_settings(1)["START_SWA"] == 1
           and train_run.stage_two_weights(0.5, 1000.0, 10.0, swa_hessian_weight=7.0) == 7.0)
+    cm = train_run.control_settings(10, multiheads=True)
+    check("the fork's multihead rule is mirrored: lr 0.0001, EMA on, decay 0.99999",
+          (cm["LR"], cm["EMA"], cm["EMA_DECAY"]) == (0.0001, True, 0.99999), cm)
+    check("... and swa_lr stays derived from the requested lr (the fork does not recompute it)",
+          abs(cm["SWA_LR"] - 0.01 / 40) < 1e-15, cm)
+    cf = train_run.control_settings(10, lr=0.002, ema=False, ema_decay=0.995, multiheads=True, force_mh_ft_lr=True)
+    check("force_mh_ft_lr steps the mirror aside", (cf["LR"], cf["EMA"], cf["EMA_DECAY"]) == (0.002, False, 0.995), cf)
+    changed = {}
+    train_run.control_settings(10, lr=0.002, multiheads=True, warn=changed.update)
+    check("the mirror reports what it replaced", changed.get("LR") == (0.002, 0.0001), changed)
+    cov = train_run.control_settings(10, multiheads=True, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
+    check("the extras fold sits under the fork rule: an overlaid lr is still forced in multihead",
+          (cov["LR"], cov["EMA_DECAY"]) == (0.0001, 0.99999), cov)
+    cos_ = train_run.control_settings(10, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
+    check("... while single-head keeps the overlaid values", (cos_["LR"], cos_["EMA_DECAY"]) == (0.002, 0.995), cos_)
+    pmh = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", multiheads=True))
+    check("multihead emission carries the mirrored lr and decay, and no force flag",
+          pmh["--lr"] == "0.0001" and pmh["--ema_decay"] == "0.99999" and "--force_mh_ft_lr" not in pmh, pmh)
+    pf = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", multiheads=True, force_mh_ft_lr=True))
+    check("a forced run emits the native flag and keeps the requested lr",
+          pf["--force_mh_ft_lr"] == "True" and pf["--lr"] == "0.01", pf)
+    ov = train_run.control_overrides(["--clip_grad", "1.0", "--lr", "0.002", "--ema_decay=0.995", "--ema"])
+    check("the extras fold takes the controlled keys only, in mace's spelling",
+          ov == {"LR": 0.002, "EMA_DECAY": 0.995, "EMA": True}, ov)
+    check("... and carries the force verdict",
+          train_run.control_overrides(["--force_mh_ft_lr", "True"]) == {"FORCE_MH_FT_LR": True})
+    try:
+        train_run.run_training("t", "t", "t", "l", "r", multiheads=True)
+        check("run_training refuses multiheads without a Replay file", False)
+    except ValueError as exc:
+        check("run_training refuses multiheads without a Replay file",
+              "--pt-train-file" in str(exc) and "Replay" in str(exc), exc)
+    info_schema = train_run.SCHEMA["Calculation_Info"]
+    check("the schema states the fork's rule: EMA_DECAY typed, the descriptions name it",
+          info_schema["EMA_DECAY"][0] == "Double" and "0.99999" in info_schema["EMA_DECAY"][2]
+          and "0.0001" in info_schema["LR"][2] and "multihead" in info_schema["EMA"][2])
     pn = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", ema=False, swa=False))
     check("ema and swa can be switched off (no --ema, no --swa flags)", "--ema" not in pn and "--swa" not in pn and "--start_swa" not in pn)
     check("a bare flag maps to True, not to the next flag's name",

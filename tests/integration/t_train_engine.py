@@ -261,11 +261,29 @@ def main():
         check("the log names the external loss in multihead mode and never the universal loss",
               "Multiheads finetuning with the external loss" in mlog and "WeightedEnergyForcesHessianLoss" in mlog
               and "UniversalLoss" not in mlog)
+        check("the multihead Record carries the fork's mirrored control: lr 0.0001 / EMA on / decay 0.99999",
+              (mi["LR"], mi["EMA"], mi["EMA_DECAY"]) == (0.0001, True, 0.99999), (mi["LR"], mi["EMA"], mi["EMA_DECAY"]))
+        check("... and the fork's own log line agrees",
+              "Multihead finetuning mode, setting learning rate to 0.0001 and EMA to True" in mlog)
         check("MACE_FORK_COMMIT is not commit B's (commit C or later), 40 hex",
               mi["MACE_FORK_COMMIT"] != FORK_COMMIT_B and len(mi["MACE_FORK_COMMIT"]) == 40, mi["MACE_FORK_COMMIT"])
         check("... the replay frames carry no Hessian, so only the fine-tuning head's do",
               all("REF_hessian" not in a.info for a in read(str(pt), index=":", format="extxyz"))
               and mi["N_TRAIN_HESSIAN"] == 2)
+
+        # (19) the extras `=` form and the mirror, on the dry-run path -----------------------------
+        eq = train_run.run_training(
+            d, "test", "smoke_fit", LEVEL, "eq1", dry_run=True, strict_fork=False,
+            extra=["--clip_grad=1.0"])
+        eq_cfg = (eq["run_dir"] / "config.yaml").read_text()
+        check("a single-token extra lands in config.yaml as a pair, not as a bare flag",
+              "clip_grad: 1.0" in eq_cfg and "clip_grad=1.0: True" not in eq_cfg
+              and "ema_decay: 0.99" in eq_cfg, eq_cfg)
+        fs = train_run.run_training(
+            d, "test", "smoke_fit", LEVEL, "fs1", dry_run=True, strict_fork=False,
+            lr=0.002, multiheads=True, pt_train_file=str(pt), force_mh_ft_lr=True)
+        check("a forced multihead dry-run keeps the requested lr in the Record and the argv carries the flag",
+              fs["info"]["LR"] == 0.002 and fs["argv"].count("--force_mh_ft_lr") == 1)
 
         # --- the exact anchors --------------------------------------------------------------------
         before, after = mi["VALID_HESSIAN_EXACT_BEFORE"], mi["VALID_HESSIAN_EXACT_AFTER"]

@@ -89,6 +89,14 @@ DEFAULT_SWA_ENERGY_WEIGHT = 1000.0
 DEFAULT_SWA_FORCES_WEIGHT = 100.0
 #: mace's `--real_pt_data_ratio_threshold`: 0 = never duplicate the fine-tune frames
 REAL_PT_DATA_RATIO_THRESHOLD = 0.0
+#: mace's `--ema_decay` default; the fork's multihead rule below overrides it when it applies
+DEFAULT_EMA_DECAY = 0.99
+#: the fork's multihead rule (`mace/mace/cli/run_train.py:204-210`, under its
+#: `if not args.force_mh_ft_lr` gate): with a foundation model and multihead mode on,
+#: mace sets these unless `--force_mh_ft_lr`. Mirrored in `control_settings` so the
+#: Record, the argv, the config file and the printout agree (ticket 14)
+MULTIHEAD_FT_LR = 0.0001
+MULTIHEAD_FT_EMA_DECAY = 0.99999
 #: a validation Hessian curve whose relative range is below this "did not move"
 FLAT_CURVE_TOL = 1e-6
 
@@ -133,11 +141,12 @@ SCHEMA = {
         "SEED": ("Integer", None, "mace's seed; also the training probe generator's"),
         "DEVICE": ("String", None, "cpu / cuda"),
         "DTYPE": ("String", None, "float64 throughout, as the Labels are"),
-        "LR": ("Double", None, "the learning rate (mace's --lr)"),
+        "LR": ("Double", None, "the learning rate (mace's --lr); multihead mode trains at the fork's 0.0001 unless --force_mh_ft_lr (records written before 2026-10-01 hold the requested value; the run trained at the fork's)"),
         "SCHEDULER_PATIENCE": ("Integer", None, "ReduceLROnPlateau patience on the total validation loss, epochs"),
         "PATIENCE": ("Integer", None, "early-stopping patience on the total validation loss, epochs"),
         "EVAL_INTERVAL": ("Integer", None, "validate every this many epochs"),
-        "EMA": ("Boolean", None, "exponential moving average of the parameters (mace's --ema)"),
+        "EMA": ("Boolean", None, "exponential moving average of the parameters (mace's --ema); forced True in multihead mode unless --force_mh_ft_lr"),
+        "EMA_DECAY": ("Double", None, "the EMA decay (mace's --ema_decay; 0.99 when the run carries none); 0.99999 in multihead mode unless --force_mh_ft_lr"),
         "SWA": ("Boolean", None, "Stage Two on (mace's --swa)"),
         "START_SWA": ("Integer", None, "the epoch Stage Two starts at (3/4 of MAX_NUM_EPOCHS by default)"),
         "SWA_LR": ("Double", None, "the Stage Two learning rate (LR / 40 by default, the base's ratio)"),
@@ -294,24 +303,84 @@ def stage_two_weights(hessian_weight, forces_weight, swa_forces_weight, swa_hess
     return float(hessian_weight) * float(swa_forces_weight) / float(forces_weight)
 
 
+#: the controlled keys of mace's argv a run's extras may override, with the control's types
+_CONTROL_KEYS = {
+    "lr": ("LR", float), "scheduler_patience": ("SCHEDULER_PATIENCE", int),
+    "patience": ("PATIENCE", int), "eval_interval": ("EVAL_INTERVAL", int),
+    "ema": ("EMA", bool), "ema_decay": ("EMA_DECAY", float),
+    "swa": ("SWA", bool), "start_swa": ("START_SWA", int), "swa_lr": ("SWA_LR", float),
+    "swa_energy_weight": ("SWA_ENERGY_WEIGHT", float), "swa_forces_weight": ("SWA_FORCES_WEIGHT", float),
+    "swa_hessian_weight": ("SWA_HESSIAN_WEIGHT", float),
+}
+
+
+def _truthy(value):
+    """mace's str2bool truth set, for the boolean flags that reach us as tokens."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ("1", "true", "t", "yes", "y")
+
+
+def _mirror_warning(changed):
+    """The fork's multihead rule replaced a requested value: printed, not swallowed (ticket 14)."""
+    print("multihead rule: " + ", ".join(
+        "{} {} -> {}".format(k, old, new) for k, (old, new) in sorted(changed.items())))
+
+
+def control_overrides(extra):
+    """A run's extras as a control overlay: the controlled keys mace would apply last
+    (`--lr 0.002`, `--ema_decay=0.995`, a bare `--ema`), coerced to the control's types,
+    plus `FORCE_MH_FT_LR` when `--force_mh_ft_lr` arrives true."""
+    pairs = argv_pairs(extra or ())
+    out = {}
+    for name, (key, cast) in _CONTROL_KEYS.items():
+        if name in pairs:
+            value = pairs[name]
+            try:
+                out[key] = cast(value) if cast is not bool else _truthy(value)
+            except (TypeError, ValueError):
+                raise ValueError("bad value in the extras for --{}: {!r}".format(name, value))
+    if "force_mh_ft_lr" in pairs:
+        out["FORCE_MH_FT_LR"] = _truthy(pairs["force_mh_ft_lr"])
+    return out
+
+
 def control_settings(max_epochs, lr=None, scheduler_patience=DEFAULT_SCHEDULER_PATIENCE, patience=DEFAULT_PATIENCE,
                      eval_interval=DEFAULT_EVAL_INTERVAL, ema=True, swa=True, start_swa=None, swa_lr=None,
                      swa_energy_weight=DEFAULT_SWA_ENERGY_WEIGHT, swa_forces_weight=DEFAULT_SWA_FORCES_WEIGHT,
-                     hessian_weight=1.0, forces_weight=100.0, swa_hessian_weight=None):
+                     hessian_weight=1.0, forces_weight=100.0, swa_hessian_weight=None,
+                     ema_decay=None, multiheads=False, force_mh_ft_lr=False, overrides=None, warn=None):
     """Every control value with its default resolved, as one dict (the Record's and the
-    argv's single source): LR, SCHEDULER_PATIENCE, PATIENCE, EVAL_INTERVAL, EMA, SWA,
-    START_SWA (3 x max_epochs // 4, at least 1), SWA_LR (LR / 40), the Stage Two weights."""
+    argv's single source): LR, SCHEDULER_PATIENCE, PATIENCE, EVAL_INTERVAL, EMA, EMA_DECAY,
+    SWA, START_SWA (3 x max_epochs // 4, at least 1), SWA_LR (LR / 40), the Stage Two weights.
+
+    `overrides` (a `control_overrides` mapping) is folded in first -- the extras win at
+    mace's parser, which runs after us -- and the fork's multihead rule is mirrored last
+    (`run_train.py:204-210`): with multiheads on and no `force_mh_ft_lr`, LR / EMA /
+    EMA_DECAY become the fork's values and `warn` receives what changed. `SWA_LR` is not
+    recomputed -- the fork does not recompute it either."""
     lr = DEFAULT_LR if lr is None else float(lr)
+    ema_decay = DEFAULT_EMA_DECAY if ema_decay is None else float(ema_decay)
     max_epochs = int(max_epochs)
-    return dict(
+    ctl = dict(
         LR=float(lr),
         SCHEDULER_PATIENCE=int(scheduler_patience), PATIENCE=int(patience), EVAL_INTERVAL=int(eval_interval),
-        EMA=bool(ema), SWA=bool(swa),
+        EMA=bool(ema), EMA_DECAY=float(ema_decay), SWA=bool(swa),
         START_SWA=int(start_swa) if start_swa is not None else max(1, 3 * max_epochs // 4),
         SWA_LR=float(swa_lr) if swa_lr is not None else float(lr) / SWA_LR_RATIO,
         SWA_ENERGY_WEIGHT=float(swa_energy_weight), SWA_FORCES_WEIGHT=float(swa_forces_weight),
         SWA_HESSIAN_WEIGHT=stage_two_weights(hessian_weight, forces_weight, swa_forces_weight, swa_hessian_weight),
     )
+    for key, value in (overrides or {}).items():
+        if key in ctl:
+            ctl[key] = value
+    if multiheads and not force_mh_ft_lr:
+        forced = dict(LR=MULTIHEAD_FT_LR, EMA=True, EMA_DECAY=MULTIHEAD_FT_EMA_DECAY)
+        changed = {k: (ctl[k], v) for k, v in forced.items() if ctl[k] != v}
+        ctl.update(forced)
+        if changed and warn is not None:
+            warn(changed)
+    return ctl
 
 
 def hessian_weight_balance(foundation_name, train_file, energy_weight=1.0, forces_weight=100.0,
@@ -369,18 +438,21 @@ def mace_argv(train_file, valid_file, run, work_dir, foundation, level, *, energ
               max_epochs=100, batch_size=4, valid_batch_size=None,
               seed=123, device="cpu", lr=None, multiheads=False, pt_train_file=None, pt_valid_file=None,
               scheduler_patience=DEFAULT_SCHEDULER_PATIENCE, patience=DEFAULT_PATIENCE,
-              eval_interval=DEFAULT_EVAL_INTERVAL, ema=True, swa=True, start_swa=None, swa_lr=None,
+              eval_interval=DEFAULT_EVAL_INTERVAL, ema=True, ema_decay=None, swa=True, start_swa=None, swa_lr=None,
               swa_energy_weight=DEFAULT_SWA_ENERGY_WEIGHT, swa_forces_weight=DEFAULT_SWA_FORCES_WEIGHT,
-              swa_hessian_weight=None, extra=()):
+              swa_hessian_weight=None, force_mh_ft_lr=False, extra=()):
     """mace's command line for one fine-tune, as a list. The keys are the Dataset's
     (`REF_*`), the loss is ours by name, the dtype is float64 because the Labels are,
-    every control flag is explicit, and the Replay is the file and nothing
-    else (no `--num_samples_pt`, the duplication threshold 0)."""
+    every control flag -- the decay included -- is explicit, and the Replay is the file
+    and nothing else (no `--num_samples_pt`, the duplication threshold 0). Multihead runs
+    carry the fork's own values: `control_settings` mirrors them, and `force_mh_ft_lr` is
+    passed through so a forced run is not forced by the fork either."""
     ctl = control_settings(max_epochs, lr=lr, scheduler_patience=scheduler_patience, patience=patience,
                            eval_interval=eval_interval, ema=ema, swa=swa, start_swa=start_swa, swa_lr=swa_lr,
                            swa_energy_weight=swa_energy_weight, swa_forces_weight=swa_forces_weight,
                            hessian_weight=hessian_weight, forces_weight=forces_weight,
-                           swa_hessian_weight=swa_hessian_weight)
+                           swa_hessian_weight=swa_hessian_weight, ema_decay=ema_decay,
+                           multiheads=multiheads, force_mh_ft_lr=force_mh_ft_lr)
     argv = [
         "--name", str(run),
         "--work_dir", str(work_dir),
@@ -412,7 +484,7 @@ def mace_argv(train_file, valid_file, run, work_dir, foundation, level, *, energ
         "--eval_interval", str(ctl["EVAL_INTERVAL"]),
     ]
     if ctl["EMA"]:
-        argv += ["--ema"]
+        argv += ["--ema", "--ema_decay", repr(ctl["EMA_DECAY"])]
     if ctl["SWA"]:
         argv += ["--swa", "--start_swa", str(ctl["START_SWA"]), "--swa_lr", repr(ctl["SWA_LR"]),
                  "--swa_energy_weight", repr(ctl["SWA_ENERGY_WEIGHT"]),
@@ -427,23 +499,33 @@ def mace_argv(train_file, valid_file, run, work_dir, foundation, level, *, energ
             argv += ["--pt_valid_file", str(pt_valid_file)]
     else:
         argv += ["--multiheads_finetuning", "False"]
+    if force_mh_ft_lr:
+        # the fork would set its own lr/EMA/decay; the run asked for its values (not recommended by mace)
+        argv += ["--force_mh_ft_lr", "True"]
     argv += [str(a) for a in extra]
     return argv
 
 
 def argv_pairs(argv):
-    """mace's command line as a mapping. A bare flag (`--save_cpu`) maps to True, so the
-    config file and any reader of it see the same settings the parser did."""
+    """mace's command line as a mapping. A bare flag (`--save_cpu`) maps to True; a single
+    `--name=value` token splits at its first `=` (mace's parser reads it the same way), so
+    the config file and any reader of it see the same settings the parser did."""
     out, i = {}, 0
     argv = [str(a) for a in argv]
     while i < len(argv):
-        key = argv[i].lstrip("-")
-        if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
-            out[key] = argv[i + 1]
-            i += 2
-        else:
-            out[key] = True
+        token = argv[i]
+        if token.startswith("--") and "=" in token[2:]:
+            key, _, value = token[2:].partition("=")
+            out[key] = value
             i += 1
+        else:
+            key = token.lstrip("-")
+            if i + 1 < len(argv) and not argv[i + 1].startswith("--"):
+                out[key] = argv[i + 1]
+                i += 2
+            else:
+                out[key] = True
+                i += 1
     return out
 
 
@@ -599,6 +681,9 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
     if "num_samples_pt" in settings:
         raise TypeError("num_samples_pt is not a setting: the Replay's size is its file's; "
                         "draw it with scripts/tooling/s0_spice_pt_draw.py --n N")
+    if bool(settings.get("multiheads", False)) and not settings.get("pt_train_file"):
+        raise ValueError("multiheads without a Replay file: pass --pt-train-file -- without one the fork "
+                         "silently disables multihead mode, so the Record would describe a run that did not happen")
     dataset_dir = Path(dataset_dir)
     run_dir = dataset_dir / STEP / run
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -611,6 +696,11 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
     settings = dict(settings)
     # not mace's: the two full-matrix readings of the Hessian term on the validation file
     exact_anchors = bool(settings.pop("exact_anchors", True))
+    # the fork forces after parsing: fold the extras for the controlled keys, then the
+    # multihead rule (ticket 14); FORCE_MH_FT_LR rides in the overrides as the verdict input
+    overrides = control_overrides(settings.get("extra", ()))
+    forced = bool(settings.get("force_mh_ft_lr", False)) or bool(overrides.pop("FORCE_MH_FT_LR", False))
+    settings["force_mh_ft_lr"] = forced
     rule, balance = "given", dict(L_E=0.0, L_F=0.0, L_H=0.0)
     if str(settings.get("hessian_weight", 1.0)) == "balance":
         rule = "balance"
@@ -635,7 +725,10 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
                            swa_forces_weight=settings.get("swa_forces_weight", DEFAULT_SWA_FORCES_WEIGHT),
                            hessian_weight=settings.get("hessian_weight", 1.0),
                            forces_weight=settings.get("forces_weight", 100.0),
-                           swa_hessian_weight=settings.get("swa_hessian_weight"))
+                           swa_hessian_weight=settings.get("swa_hessian_weight"),
+                           ema_decay=settings.get("ema_decay"),
+                           multiheads=bool(settings.get("multiheads", False)),
+                           force_mh_ft_lr=forced, overrides=overrides, warn=_mirror_warning)
 
     multiheads = bool(settings.get("multiheads", False))
     pt_file = settings.get("pt_train_file") if multiheads else None
@@ -822,8 +915,8 @@ def _write_report(path, info, epochs):
                  "every Dataset. The counts PT_HEAD_* / FT_HEAD_* are mace's own, parsed from its log, and equal "
                  "the files' because the duplication threshold is 0.")
     rep.section("the control (the base's recipe)")
-    for k in ("LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "SWA", "START_SWA", "SWA_LR",
-              "STAGE_TWO_EPOCH"):
+    for k in ("LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "EMA_DECAY", "SWA", "START_SWA",
+              "SWA_LR", "STAGE_TWO_EPOCH"):
         rep.kv(k, info.get(k))
     rep.section("StageTwo weights (w_H^(2) = w_H x w_F^(2) / w_F)")
     for k in ("SWA_ENERGY_WEIGHT", "SWA_FORCES_WEIGHT", "SWA_HESSIAN_WEIGHT"):
