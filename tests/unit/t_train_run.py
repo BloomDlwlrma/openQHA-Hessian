@@ -120,14 +120,16 @@ def main():
     changed = {}
     train_run.control_settings(10, lr=0.002, multiheads=True, warn=changed.update)
     check("the mirror reports what it replaced", changed.get("LR") == (0.002, 0.0001), changed)
-    cov = train_run.control_settings(10, multiheads=True, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
+    ovm = train_run.control_settings(10, multiheads=True, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
     check("the extras fold sits under the fork rule: an overlaid lr is still forced in multihead",
-          (cov["LR"], cov["EMA_DECAY"]) == (0.0001, 0.99999), cov)
-    cos_ = train_run.control_settings(10, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
-    check("... while single-head keeps the overlaid values", (cos_["LR"], cos_["EMA_DECAY"]) == (0.002, 0.995), cos_)
+          (ovm["LR"], ovm["EMA_DECAY"]) == (0.0001, 0.99999), ovm)
+    ovs = train_run.control_settings(10, overrides={"LR": 0.002, "EMA_DECAY": 0.995})
+    check("... while single-head keeps the overlaid values", (ovs["LR"], ovs["EMA_DECAY"]) == (0.002, 0.995), ovs)
     pmh = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", multiheads=True))
     check("multihead emission carries the mirrored lr and decay, and no force flag",
           pmh["--lr"] == "0.0001" and pmh["--ema_decay"] == "0.99999" and "--force_mh_ft_lr" not in pmh, pmh)
+    psh = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", force_mh_ft_lr=True))
+    check("a single-head run never carries the multihead force flag", "--force_mh_ft_lr" not in psh, psh)
     pf = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", multiheads=True, force_mh_ft_lr=True))
     check("a forced run emits the native flag and keeps the requested lr",
           pf["--force_mh_ft_lr"] == "True" and pf["--lr"] == "0.01", pf)
@@ -404,7 +406,7 @@ def main():
               (Path(td) / "train.out").is_file() and (Path(td) / "train.dat").is_file()
               and "did not move" in (Path(td) / "train.out").read_text(encoding="utf-8"))
 
-    print("\n{} checks, {} failed".format(42, len(FAIL)))
+    print("\n{} checks, {} failed".format(43, len(FAIL)))
     return 1 if FAIL else 0
 
 

@@ -284,6 +284,21 @@ def main():
             lr=0.002, multiheads=True, pt_train_file=str(pt), force_mh_ft_lr=True)
         check("a forced multihead dry-run keeps the requested lr in the Record and the argv carries the flag",
               fs["info"]["LR"] == 0.002 and fs["argv"].count("--force_mh_ft_lr") == 1)
+        ov = train_run.run_training(
+            d, "test", "smoke_fit", LEVEL, "ov1", dry_run=True, strict_fork=False,
+            extra=["--lr", "0.002"])
+        check("a single-head extras override is recorded (the fold reaches the Record)",
+              ov["info"]["LR"] == 0.002 and ov["argv"][-2:] == ["--lr", "0.002"], ov["info"]["LR"])
+        fx = train_run.run_training(
+            d, "test", "smoke_fit", LEVEL, "fx1", dry_run=True, strict_fork=False,
+            multiheads=True, pt_train_file=str(pt), extra=["--force_mh_ft_lr", "True"])
+        check("an extras force verdict steps the mirror aside (the Record keeps the request)",
+              fx["info"]["LR"] == 0.01 and fx["info"]["EMA_DECAY"] == 0.99, (fx["info"]["LR"], fx["info"]["EMA_DECAY"]))
+        fz = train_run.run_training(
+            d, "test", "smoke_fit", LEVEL, "fz1", dry_run=True, strict_fork=False,
+            multiheads=True, pt_train_file=str(pt), force_mh_ft_lr=True, extra=["--force_mh_ft_lr", "False"])
+        check("an extras false verdict beats the driver flag: the mirror applies and the Record states the fork's values",
+              (fz["info"]["LR"], fz["info"]["EMA"], fz["info"]["EMA_DECAY"]) == (0.0001, True, 0.99999))
 
         # --- the exact anchors --------------------------------------------------------------------
         before, after = mi["VALID_HESSIAN_EXACT_BEFORE"], mi["VALID_HESSIAN_EXACT_AFTER"]

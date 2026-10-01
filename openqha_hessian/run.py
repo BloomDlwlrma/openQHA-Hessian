@@ -94,7 +94,7 @@ DEFAULT_EMA_DECAY = 0.99
 #: the fork's multihead rule (`mace/mace/cli/run_train.py:204-210`, under its
 #: `if not args.force_mh_ft_lr` gate): with a foundation model and multihead mode on,
 #: mace sets these unless `--force_mh_ft_lr`. Mirrored in `control_settings` so the
-#: Record, the argv, the config file and the printout agree (ticket 14)
+#: Record, the argv, the config file and the printout agree.
 MULTIHEAD_FT_LR = 0.0001
 MULTIHEAD_FT_EMA_DECAY = 0.99999
 #: a validation Hessian curve whose relative range is below this "did not move"
@@ -145,8 +145,8 @@ SCHEMA = {
         "SCHEDULER_PATIENCE": ("Integer", None, "ReduceLROnPlateau patience on the total validation loss, epochs"),
         "PATIENCE": ("Integer", None, "early-stopping patience on the total validation loss, epochs"),
         "EVAL_INTERVAL": ("Integer", None, "validate every this many epochs"),
-        "EMA": ("Boolean", None, "exponential moving average of the parameters (mace's --ema); forced True in multihead mode unless --force_mh_ft_lr"),
-        "EMA_DECAY": ("Double", None, "the EMA decay (mace's --ema_decay; 0.99 when the run carries none); 0.99999 in multihead mode unless --force_mh_ft_lr"),
+        "EMA": ("Boolean", None, "exponential moving average of the parameters (mace's --ema); forced True in multihead mode unless --force_mh_ft_lr (records written before 2026-10-01 hold the requested value; multihead runs trained with it on)"),
+        "EMA_DECAY": ("Double", None, "the EMA decay (mace's --ema_decay; 0.99 when the run carries none); 0.99999 in multihead mode unless --force_mh_ft_lr (records written before 2026-10-01 carry no decay; multihead runs trained at the fork's 0.99999)"),
         "SWA": ("Boolean", None, "Stage Two on (mace's --swa)"),
         "START_SWA": ("Integer", None, "the epoch Stage Two starts at (3/4 of MAX_NUM_EPOCHS by default)"),
         "SWA_LR": ("Double", None, "the Stage Two learning rate (LR / 40 by default, the base's ratio)"),
@@ -322,7 +322,7 @@ def _truthy(value):
 
 
 def _mirror_warning(changed):
-    """The fork's multihead rule replaced a requested value: printed, not swallowed (ticket 14)."""
+    """The fork's multihead rule replaced a requested value: printed, not swallowed."""
     print("multihead rule: " + ", ".join(
         "{} {} -> {}".format(k, old, new) for k, (old, new) in sorted(changed.items())))
 
@@ -330,7 +330,8 @@ def _mirror_warning(changed):
 def control_overrides(extra):
     """A run's extras as a control overlay: the controlled keys mace would apply last
     (`--lr 0.002`, `--ema_decay=0.995`, a bare `--ema`), coerced to the control's types,
-    plus `FORCE_MH_FT_LR` when `--force_mh_ft_lr` arrives true."""
+    plus `FORCE_MH_FT_LR` (the force verdict, not a control) when `--force_mh_ft_lr`
+    arrives true."""
     pairs = argv_pairs(extra or ())
     out = {}
     for name, (key, cast) in _CONTROL_KEYS.items():
@@ -499,7 +500,7 @@ def mace_argv(train_file, valid_file, run, work_dir, foundation, level, *, energ
             argv += ["--pt_valid_file", str(pt_valid_file)]
     else:
         argv += ["--multiheads_finetuning", "False"]
-    if force_mh_ft_lr:
+    if force_mh_ft_lr and multiheads:
         # the fork would set its own lr/EMA/decay; the run asked for its values (not recommended by mace)
         argv += ["--force_mh_ft_lr", "True"]
     argv += [str(a) for a in extra]
@@ -681,7 +682,8 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
     if "num_samples_pt" in settings:
         raise TypeError("num_samples_pt is not a setting: the Replay's size is its file's; "
                         "draw it with scripts/tooling/s0_spice_pt_draw.py --n N")
-    if bool(settings.get("multiheads", False)) and not settings.get("pt_train_file"):
+    multiheads = bool(settings.get("multiheads", False))
+    if multiheads and not settings.get("pt_train_file"):
         raise ValueError("multiheads without a Replay file: pass --pt-train-file -- without one the fork "
                          "silently disables multihead mode, so the Record would describe a run that did not happen")
     dataset_dir = Path(dataset_dir)
@@ -697,9 +699,11 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
     # not mace's: the two full-matrix readings of the Hessian term on the validation file
     exact_anchors = bool(settings.pop("exact_anchors", True))
     # the fork forces after parsing: fold the extras for the controlled keys, then the
-    # multihead rule (ticket 14); FORCE_MH_FT_LR rides in the overrides as the verdict input
+    # multihead rule -- and the extras' own force verdict wins over the driver's flag,
+    # because that is what mace's parser will do with the same argv
     overrides = control_overrides(settings.get("extra", ()))
-    forced = bool(settings.get("force_mh_ft_lr", False)) or bool(overrides.pop("FORCE_MH_FT_LR", False))
+    extra_forced = overrides.pop("FORCE_MH_FT_LR", None)
+    forced = bool(settings.get("force_mh_ft_lr", False)) if extra_forced is None else bool(extra_forced)
     settings["force_mh_ft_lr"] = forced
     rule, balance = "given", dict(L_E=0.0, L_F=0.0, L_H=0.0)
     if str(settings.get("hessian_weight", 1.0)) == "balance":
@@ -730,7 +734,7 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
                            multiheads=bool(settings.get("multiheads", False)),
                            force_mh_ft_lr=forced, overrides=overrides, warn=_mirror_warning)
 
-    multiheads = bool(settings.get("multiheads", False))
+    # (multiheads is read up front, before the Replay-file refusal)
     pt_file = settings.get("pt_train_file") if multiheads else None
     replay = replay_file_summary(pt_file) if pt_file else dict(n_frames=0, config_weight="-")
     n_hess = counts["train"][1]
