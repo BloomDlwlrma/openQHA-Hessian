@@ -107,20 +107,41 @@ def replay_ratio(n_train, n_hessian, num_samples_pt):
 
 
 def epoch_zero_balance(calc, train_file, energy_weight=1.0, forces_weight=100.0, probe="cartesian",
+                       n_probes=4, seed=123, chunk=8,
                        hessian_key="REF_hessian", energy_key="REF_energy",
                        forces_key="REF_forces"):
     """The three terms of eq. 11 on the BASE model, before a single step.
 
     `L_E` and `L_F` are mace's per-config-weighted squared errors as the loss computes
-    them (energy per atom, forces per component); `L_H` is the target EXACTLY -- the full
-    matrix, eq. 1', the one target -- averaged over the frames that carry a
-    Label.
-    Returns the terms and `w_H = w_F L_F / L_H`, the weight at which the Hessian term
-    enters with the same gradient share as the forces at epoch 0.
+    them (energy per atom, forces per component). `L_H` is read with `probe`, one of
+    `phl.PROBE_MODES`, over the frames that carry a Label:
+
+      * `cartesian` -- the target EXACTLY: the full matrix, eq. 1' (the number the
+        anchors and the judge keep reading; the same path, unchanged);
+      * `gaussian` / `rademacher` -- the trained loss's own estimator: `n_probes` (k)
+        probes per frame, drawn per frame in file order from ONE dedicated generator
+        seeded by `seed`, computed `chunk` frames at a time through the same probe
+        packing and force-graph HVP the loss runs every step (inference here: no
+        third-order graph), and averaged frame by frame as
+        `sum_j ||H_theta v_j - H_r v_j||^2 / (9 N^2 k)`.
+
+    The estimator is unbiased for the exact value; its fixed-seed offset sits far below
+    the per-step noise the loss itself trains through, and the returned `PROBE` /
+    `N_PROBES` name it beside the value. A chunk is a pure compute reorganization: the
+    draws are per frame, so the value does not depend on it.
+
+    Returns the terms, `N_PROBES` (0 for the exact path) and `w_H = w_F L_F / L_H`,
+    the weight at which the Hessian term enters with the same gradient share as the
+    forces at epoch 0.
     """
+    if probe not in phl.PROBE_MODES:
+        raise ValueError("probe must be one of {}; got {!r}".format(phl.PROBE_MODES, probe))
+    chunk = int(chunk)
+    if chunk < 1:
+        raise ValueError("chunk must be >= 1; got {}".format(chunk))
     from ase.io import read
     frames = read(str(train_file), index=":", format="extxyz")
-    e_sq, f_sq, h_vals = [], [], []
+    e_sq, f_sq, h_vals, labelled = [], [], [], []
     for atoms in frames:
         at = atoms.copy()
         at.calc = calc
@@ -140,13 +161,32 @@ def epoch_zero_balance(calc, train_file, energy_weight=1.0, forces_weight=100.0,
             continue
         n3 = 3 * len(atoms)
         h_r = np.asarray(flat, dtype=float).reshape(n3, n3)
-        from .judge import hessian_at
-        h_e = hessian_at(calc, atoms)
-        h_vals.append(phl.loss_full(h_e, h_r))
+        if probe == "cartesian":
+            from .judge import hessian_at
+            h_e = hessian_at(calc, atoms)
+            h_vals.append(phl.loss_full(h_e, h_r))
+        else:
+            labelled.append((atoms, h_r))
+    if labelled:
+        # per-frame draws from one dedicated generator; chunks through the batched HVP
+        from . import hvp as hvp_mod
+        rng = np.random.default_rng(seed)
+        for start in range(0, len(labelled), chunk):
+            group = labelled[start:start + chunk]
+            probes, refs, infos = [], [], []
+            for atoms, h_r in group:
+                v, r, info = phl.make_probes(h_r, mode=probe, k=n_probes, rng=rng)
+                probes.append(v)
+                refs.append(r)
+                infos.append(info)
+            hvs = hvp_mod.hvp_from_atoms_batch(calc, [a for a, _hr in group], probes)
+            for hv, r, info in zip(hvs, refs, infos):
+                h_vals.append(phl.estimator_from_products(hv, r, info))
     l_e = float(np.mean(e_sq)) if e_sq else None
     l_f = float(np.mean(f_sq)) if f_sq else None
     l_h = float(np.mean(h_vals)) if h_vals else None
     out = dict(N_FRAMES=len(frames), N_HESSIAN_FRAMES=len(h_vals), PROBE=probe,
+               N_PROBES=0 if probe == "cartesian" else int(n_probes),
                L_E=l_e, L_F=l_f, L_H=l_h, ENERGY_WEIGHT=float(energy_weight), FORCES_WEIGHT=float(forces_weight),
                WE_LE=None if l_e is None else energy_weight * l_e,
                WF_LF=None if l_f is None else forces_weight * l_f,

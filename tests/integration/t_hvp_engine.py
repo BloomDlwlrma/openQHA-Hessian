@@ -7,9 +7,11 @@ compares `openqha_hessian.hvp.hvp_from_atoms` with the 30 Cartesian unit probes 
 `calc.get_hessian()` reshaped (3N, 3N): T03 section 10 measured 1.4e-14 eV/A^2 on one
 column; the bound here is 1e-12 on all of them. Then: `training=True` returns a tensor
 with a graph and `training=False` one without; a two-molecule batch (propanal twice, the
-second shifted 10 A) returns each molecule's own HVP to 1e-12; `along_mode_curvature`
-on the reference modes equals `L^T K L` from the full matrix to 1e-12. SKIPs without the
-model.
+second shifted 10 A) returns each molecule's own HVP to 1e-12; two separate frames
+collated like the training batch (`hvp_from_atoms_batch`, the balance's estimator path,
+each frame with its own probes) return each frame's own HVP to 1e-12;
+`along_mode_curvature` on the reference modes equals `L^T K L` from the full matrix to
+1e-12. SKIPs without the model.
 """
 import sys
 from pathlib import Path
@@ -86,6 +88,15 @@ def main():
     d = max(float(np.abs(hv_pair[:, :n] - hv_a).max()), float(np.abs(hv_pair[:, n:] - hv_b).max()))
     check("two-molecule batch = per-molecule HVPs to 1e-12 (max {:.1e})".format(d), d < 1e-12, d)
 
+    # --- two FRAMES collated like the training batch (the balance's estimator path) ----------
+    pa = v[:, :n].reshape(3, n3)
+    pb = v[:, n:].reshape(3, n3)                         # different probes per frame
+    hv_frames = hvp.hvp_from_atoms_batch(calc, [atoms, two], [pa, pb])
+    hv_fa = hvp.hvp_from_atoms(calc, atoms, pa)
+    hv_fb = hvp.hvp_from_atoms(calc, two, pb)
+    d = max(float(np.abs(hv_frames[0] - hv_fa).max()), float(np.abs(hv_frames[1] - hv_fb).max()))
+    check("collated frames (hvp_from_atoms_batch) = per-frame HVPs to 1e-12 (max {:.1e})".format(d), d < 1e-12, d)
+
     # --- along-mode curvature without the matrix --------------------------------------------
     masses = atoms.get_masses()
     m = np.repeat(masses, 3)
@@ -103,7 +114,7 @@ def main():
     w = hessian_mod.eigenvalues_to_cm_inv(D_hvp)
     print("  lowest along-mode curvatures (cm^-1): {}".format(np.round(np.sort(w)[:4], 1)))
 
-    print("\n{} checks, {} failed".format(8, len(FAIL)))
+    print("\n{} checks, {} failed".format(9, len(FAIL)))
     print("PASS" if not FAIL else "FAIL")
     return 1 if FAIL else 0
 

@@ -28,6 +28,10 @@ batch, against `(2 + 6N)` for the full matrix, and not `k` passes per structure.
 
 Never form `H` here. `MACECalculator.get_hessian` (mace's `compute_hessians_vmap`) is the
 full matrix and it is the RULER's path; this is the loss's.
+
+Outside mace, two atoms-level helpers ride on this: `hvp_from_atoms` (one frame) and
+`hvp_from_atoms_batch` (a chunk of frames, probes packed as the training batch packs
+them -- the balance's estimator uses the latter).
 """
 import numpy as np
 import torch
@@ -105,6 +109,61 @@ def hvp_from_atoms(calculator, atoms, probes):
     pt = torch.as_tensor(p, dtype=pos.dtype, device=pos.device)
     hvp = hessian_vector_products(model, bd, pt, training=False)
     return hvp.cpu().numpy()
+
+
+def hvp_from_atoms_batch(calculator, atoms_list, probes_list):
+    """`H v_j` for a CHUNK of frames in one pass (inference) -- the batched twin of
+    `hvp_from_atoms`, for the balance's estimator and anything that measures several
+    frames at once. Returns a list of `[k_i, N_i, 3]` arrays in eV/A^2, one per frame.
+
+    Each frame's probes `[k_i, 3N_i]` (or `[k_i, N_i, 3]`) are packed, zero outside the
+    frame's own slice, into one `[k_max, n_nodes, 3]` tensor -- exactly how the training
+    loss packs a batch (`phl_loss`'s `make_probes`) -- one forward builds the force graph
+    for the whole batch and one backward per probe index returns every frame's own
+    `H_n v_{n,j}` (a batch is block-diagonal; `t_hvp` pins it to 1e-14 and the loss leans
+    on it every step). The probes are NOT drawn here: the caller owns the generator and
+    the per-frame draws, so the numbers do not depend on the chunking.
+
+    The frames are built and merged with the calculator's own machinery --
+    `_atoms_to_batch` per frame (the neighbour list, dtype and device are
+    `get_hessian`'s), then one `mace.tools.torch_geometric.Batch.from_data_list`, the
+    same collate the training loader does. The per-frame fields are re-wrapped as base
+    `Data` objects: mace's `AtomicData` cannot be empty-constructed, so its own
+    `to_data_list` cannot split a frame back out, and the fork relies on the base
+    class's offset semantics for the merge (edge-index keys take `num_nodes`, the rest
+    concatenate). A calculator that pads its batches (`use_compile`) is not supported.
+    """
+    from mace.tools import torch_geometric
+
+    if len(atoms_list) != len(probes_list):
+        raise ValueError("atoms_list and probes_list must pair up: {} frame(s), {} probe set(s)".format(
+            len(atoms_list), len(probes_list)))
+    model = calculator.models[0]
+    data_list = []
+    for atoms in atoms_list:
+        single = calculator._atoms_to_batch(atoms)
+        fields = {k: v for k, v in single.to_dict().items() if k not in ("batch", "ptr")}
+        fields["num_nodes"] = len(atoms)
+        data_list.append(torch_geometric.Data(**fields))
+    bd = calculator._clone_batch(torch_geometric.Batch.from_data_list(data_list)).to_dict()
+
+    prepared, offsets, n_nodes = [], [], 0
+    for atoms, probes in zip(atoms_list, probes_list):
+        n = len(atoms)
+        q = np.asarray(probes, dtype=float).reshape(-1, n, 3)
+        prepared.append(q)
+        offsets.append(n_nodes)
+        n_nodes += n
+    k_max = max(q.shape[0] for q in prepared)
+    packed = np.zeros((k_max, n_nodes, 3), dtype=float)
+    for q, off in zip(prepared, offsets):
+        packed[:q.shape[0], off:off + q.shape[1], :] = q
+    # the probes take the batch's dtype, exactly as in `hvp_from_atoms`: the calculator
+    # runs float64 while the process default stays float32
+    pos = bd["positions"]
+    pt = torch.as_tensor(packed, dtype=pos.dtype, device=pos.device)
+    hv = hessian_vector_products(model, bd, pt, training=False).cpu().numpy()
+    return [hv[:q.shape[0], off:off + q.shape[1], :] for q, off in zip(prepared, offsets)]
 
 
 def along_mode_curvature(calculator, atoms, modes, masses):
