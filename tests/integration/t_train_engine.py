@@ -124,8 +124,9 @@ def main():
             hessian_weight=1e-3, max_epochs=4, batch_size=2, seed=7, device="cpu")
         info, run_dir = out["info"], out["run_dir"]
         check("the run produced a model file", Path(info["MODEL_FILE"]).is_file(), info["MODEL_FILE"])
-        check("the Record is on disk (train.out / .toml / .dat)",
-              all((run_dir / ("train" + e)).is_file() for e in (".out", ".toml", ".dat")))
+        check("the Record is train.toml only (the old train.out / train.dat are retired)",
+              (run_dir / "train.toml").is_file()
+              and not (run_dir / "train.out").exists() and not (run_dir / "train.dat").exists())
         check("the epoch table has both splits", {r["split"] for r in out["epochs"]} >= {"train", "valid"},
               sorted({r["split"] for r in out["epochs"]}))
         check("every logged loss is finite", all(r["loss"] is None or r["loss"] == r["loss"] for r in out["epochs"]))
@@ -312,9 +313,13 @@ def main():
               "|probe - exact| / exact",
               probe_last > 0 and abs(mi["VALID_PROBE_OFFSET_RUN"] - abs(probe_last - after) / after) < 1e-12,
               (probe_last, after, mi["VALID_PROBE_OFFSET_RUN"]))
-        check("the report states the pair and says the validation frames are not a generalisation reading",
-              "EXACT ANCHORS" in (mh["run_dir"] / "train.out").read_text(encoding="utf-8")
-              and "generalisation" in (mh["run_dir"] / "train.out").read_text(encoding="utf-8"))
+        rec_mh = prop.load(mh["run_dir"] / "train.toml")["Calculation_Info"]
+        check("the Record on disk carries the exact pair and the last probe reading (the report paragraph "
+              "is retired with train.out)",
+              rec_mh["EXACT_ANCHORS"] is True and rec_mh["VALID_HESSIAN_EXACT_BEFORE"] > 0
+              and 0 < rec_mh["VALID_HESSIAN_EXACT_AFTER"] and rec_mh["VALID_HESSIAN_PROBE_LAST"] > 0,
+              (rec_mh.get("VALID_HESSIAN_EXACT_BEFORE"), rec_mh.get("VALID_HESSIAN_EXACT_AFTER"),
+               rec_mh.get("VALID_HESSIAN_PROBE_LAST")))
         off = train_run.run_training(d, "test", "smoke_fit", LEVEL, "noanchor", strict_fork=False,
                                      hessian_weight=0.01, max_epochs=1, batch_size=2, seed=7,
                                      exact_anchors=False)

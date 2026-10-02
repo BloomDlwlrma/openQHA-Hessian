@@ -16,18 +16,19 @@ One run is a directory of the Dataset:
     <root>/<tag>/_datasets/<name>/train/<run>/
         config.yaml        every mace argument, as given (the file mace itself can re-run)
         <run>.model        the fine-tuned potential (and <run>_stagetwo.model with --swa)
-        checkpoints/, logs/, results/    mace's own
-        train.{out,toml}   the Record: the settings, the epoch table, the identities
+        checkpoints/, logs/, results/    mace's own (the per-step curves stay here)
+        train.toml         the Record: the identities and the validation curves (2026-10-02 ruling)
 
 THE REPLAY. `--multiheads` concatenates a file of the
 base model's own training frames (`s0_spice_pt_draw.py` writes it) into the training set
 as mace's `pt_head`. Its size is the FILE's: mace's `--num_samples_pt` is read only on
 the Materials-Project download path and is never emitted here; `--real_pt_data_ratio_
 threshold` is emitted as 0, because its default 0.1 silently duplicates the fine-tune
-frames whenever they are fewer than a tenth of the replay. The Record counts the file's
+frames whenever they are fewer than a tenth of the replay. The information counts the file's
 frames (`PT_N_FRAMES`), reads their `config_weight` (`PT_CONFIG_WEIGHT`), parses both
 heads' counts from mace's log and prints the ratio as replay frames per Hessian frame
-(`REPLAY_PER_HESSIAN_FRAME`), the number the S0 scan rows R0-R4 were defined by. mace takes
+(`REPLAY_PER_HESSIAN_FRAME`, the number the S0 scan rows R0-R4 were defined by; the slim
+Record keeps only `PT_N_FRAMES` / `PT_CONFIG_WEIGHT`). mace takes
 `--valid_fraction` of the replay file for the pretraining head's OWN validation unless
 `--pt_valid_file` names one; the draw tool writes that companion file and it is passed.
 
@@ -65,7 +66,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from openqha.potentials import engine
-from openqha.store import dat, property as prop, report
+from openqha.store import property as prop
 from openqha_hessian import package_identity
 from openqha_hessian import phl_loss
 
@@ -100,6 +101,12 @@ MULTIHEAD_FT_EMA_DECAY = 0.99999
 #: a validation Hessian curve whose relative range is below this "did not move"
 FLAT_CURVE_TOL = 1e-6
 
+#: The Record's slim identity sheet (user ruling 2026-10-02): only what the driver owns
+#: or measures -- identity, frames, the recipe's SHA, the balance, the two exact anchors,
+#: the clock, the code identities. The full recipe is the config file CONFIG_SHA256 names;
+#: the per-step curves are mace's native results file (never copied here); the mace-parsed
+#: head counts and the derived replay ratio (both printed to stdout) and the control block
+#: are out.
 SCHEMA = {
     "Calculation_Info": {
         "PROGNAME": ("String", None, "the step that wrote this file"),
@@ -114,61 +121,42 @@ SCHEMA = {
         "TRAIN_FILE": ("String", None, "the extxyz mace trained on"),
         "VALID_FILE": ("String", None, "the extxyz mace validated on"),
         "N_TRAIN": ("Integer", None, "frames in the training file"),
-        "N_VALID": ("Integer", None, "frames in the validation file"),
         "N_TRAIN_HESSIAN": ("Integer", None, "of those, frames carrying a reference Hessian"),
+        "N_VALID": ("Integer", None, "frames in the validation file"),
         "N_VALID_HESSIAN": ("Integer", None, "of those, frames carrying a reference Hessian"),
         "FOUNDATION_MODEL": ("String", None, "the base potential fine-tuned"),
         "FOUNDATION_FILE": ("String", None, "the resolved weight file of the base potential"),
         "MODEL_FILE": ("String", None, "the fine-tuned potential"),
-        "CONFIG_FILE": ("String", None, "the mace argument file"),
+        "CONFIG_FILE": ("String", None, "the mace argument file (the full recipe)"),
         "CONFIG_SHA256": ("String", None, "SHA-256 of the config file: the training recipe's identity"),
         "LOSS": ("String", None, "the loss module and factory (mace's --loss external)"),
-        "ENERGY_WEIGHT": ("Double", None, "w_E of eq. 11 (Stage One)"),
-        "FORCES_WEIGHT": ("Double", None, "w_F of eq. 11 (Stage One)"),
-        "HESSIAN_WEIGHT": ("Double", None, "w_H of eq. 11 (Stage One); the resolved value when the rule is balance"),
-        "HESSIAN_WEIGHT_RULE": ("String", None, "given (a number on the command line) or balance (w_F L_F / L_H on the base model over the train file, L_H measured with the run's probe setting -- BALANCE_PROBE / BALANCE_N_PROBES name the estimator; the exact full-matrix reading stays the job of the anchors and the judge)"),
+        "ENERGY_WEIGHT": ("Double", None, "w_E of eq. 11"),
+        "FORCES_WEIGHT": ("Double", None, "w_F of eq. 11"),
+        "HESSIAN_WEIGHT": ("Double", None, "w_H of eq. 11; the resolved value when the rule is balance"),
+        "HESSIAN_WEIGHT_RULE": ("String", None, "given or balance (w_F L_F / L_H under the run's probe setting -- BALANCE_PROBE / BALANCE_N_PROBES name the estimator)"),
         "BALANCE_L_E": ("Double", None, "the base model's per-atom energy MSE on the train file (balance rule only, else 0)"),
         "BALANCE_L_F": ("Double", None, "the base model's force MSE on the train file (balance rule only, else 0)"),
-        "BALANCE_L_H": ("Double", None, "the base model's Hessian loss ||dH||^2/(9N^2) on the train file's Hessian frames, measured with the run's probe setting (BALANCE_PROBE / BALANCE_N_PROBES; balance rule only, else 0); Records written before the estimator amendment hold the exact full-matrix reading"),
-        "BALANCE_PROBE": ("String", None, "the estimator behind BALANCE_L_H: the run's probe setting (gaussian / rademacher / cartesian); - when the rule is given"),
-        "BALANCE_N_PROBES": ("Integer", None, "probes per frame behind BALANCE_L_H (k of the estimator; 0 for the exact cartesian path or when the rule is given)"),
-        "PROBE": ("String", None, "gaussian (PHL's Algorithm 1, the default) / rademacher / cartesian (Algorithm 2): the training probes"),
+        "BALANCE_L_H": ("Double", None, "the base model's Hessian term on the train file under the run's probe setting (balance rule only, else 0); Records written before the estimator amendment hold the exact full-matrix reading"),
+        "BALANCE_PROBE": ("String", None, "the estimator behind BALANCE_L_H; - when the rule is given"),
+        "BALANCE_N_PROBES": ("Integer", None, "probes per frame behind BALANCE_L_H; 0 when not applicable"),
+        "PROBE": ("String", None, "the training probe kind: gaussian / rademacher / cartesian"),
         "N_PROBES": ("Integer", None, "probes per structure per step (k of eq. 6)"),
-        "VALID_PROBES": ("String", None, "the validation estimator: k fixed probes per frame, stored by the Dataset"),
         "MAX_NUM_EPOCHS": ("Integer", None, "epochs asked for"),
         "N_EPOCHS": ("Integer", None, "epochs the log holds"),
         "BATCH_SIZE": ("Integer", None, "structures per step"),
         "SEED": ("Integer", None, "mace's seed; also the training probe generator's"),
         "DEVICE": ("String", None, "cpu / cuda"),
         "DTYPE": ("String", None, "float64 throughout, as the Labels are"),
-        "LR": ("Double", None, "the learning rate (mace's --lr); multihead mode trains at the fork's 0.0001 unless --force_mh_ft_lr (records written before 2026-10-01 hold the requested value; the run trained at the fork's)"),
-        "SCHEDULER_PATIENCE": ("Integer", None, "ReduceLROnPlateau patience on the total validation loss, epochs"),
-        "PATIENCE": ("Integer", None, "early-stopping patience on the total validation loss, epochs"),
-        "EVAL_INTERVAL": ("Integer", None, "validate every this many epochs"),
-        "EMA": ("Boolean", None, "exponential moving average of the parameters (mace's --ema); forced True in multihead mode unless --force_mh_ft_lr (records written before 2026-10-01 hold the requested value; multihead runs trained with it on)"),
-        "EMA_DECAY": ("Double", None, "the EMA decay (mace's --ema_decay; 0.99 when the run carries none); 0.99999 in multihead mode unless --force_mh_ft_lr (records written before 2026-10-01 carry no decay; multihead runs trained at the fork's 0.99999)"),
-        "SWA": ("Boolean", None, "Stage Two on (mace's --swa)"),
-        "START_SWA": ("Integer", None, "the epoch Stage Two starts at (3/4 of MAX_NUM_EPOCHS by default)"),
-        "SWA_LR": ("Double", None, "the Stage Two learning rate (LR / 40 by default, the base's ratio)"),
-        "SWA_ENERGY_WEIGHT": ("Double", None, "w_E in Stage Two"),
-        "SWA_FORCES_WEIGHT": ("Double", None, "w_F in Stage Two"),
-        "SWA_HESSIAN_WEIGHT": ("Double", None, "w_H in Stage Two = HESSIAN_WEIGHT x SWA_FORCES_WEIGHT / FORCES_WEIGHT"),
         "STAGE_TWO_EPOCH": ("Integer", None, "the epoch the log switched to Stage Two at, or -1"),
         "MULTIHEADS": ("Boolean", None, "a Replay concatenated as mace's pretraining head"),
         "PT_TRAIN_FILE": ("String", None, "the Replay file, or -"),
-        "PT_VALID_FILE": ("String", None, "the Replay's own validation file (mace takes --valid_fraction of the Replay without one), or -"),
+        "PT_VALID_FILE": ("String", None, "the Replay's own validation file, or -"),
         "PT_N_FRAMES": ("Integer", None, "frames counted in the Replay file (0 without one)"),
-        "PT_CONFIG_WEIGHT": ("String", None, "the Replay frames' config_weight: one value, `mixed`, or - "),
-        "PT_HEAD_TRAIN": ("Integer", None, "mace's count of pretraining-head training frames (parsed from its log; -1 when not logged)"),
-        "PT_HEAD_VALID": ("Integer", None, "mace's count of pretraining-head validation frames (-1 when not logged)"),
-        "FT_HEAD_TRAIN": ("Integer", None, "mace's count of fine-tuning-head training frames (-1 when not logged)"),
-        "FT_HEAD_VALID": ("Integer", None, "mace's count of fine-tuning-head validation frames (-1 when not logged)"),
-        "REPLAY_PER_HESSIAN_FRAME": ("Double", None, "PT_N_FRAMES / N_TRAIN_HESSIAN: the Replay's size as the S0 scan rows define it (0 without a Replay)"),
-        "REAL_PT_DATA_RATIO_THRESHOLD": ("Double", None, "mace's duplication threshold, always 0 here (never duplicate the fine-tune frames)"),
+        "PT_CONFIG_WEIGHT": ("String", None, "the Replay frames' config_weight: one value, `mixed`, or -"),
         "VALID_HESSIAN_EXACT_BEFORE": ("Double", "eV^2/A^4", "the EXACT Hessian term on the validation file for the BASE model, from the full matrix; -1 when not measured"),
-        "VALID_HESSIAN_EXACT_AFTER": ("Double", "eV^2/A^4", "the same quantity for the fine-tuned model: the pair says what the run moved on the target, with no estimator noise; -1 when not measured"),
-        "VALID_HESSIAN_PROBE_LAST": ("Double", "eV^2/A^4", "the last epoch's in-loop reading of the same quantity (4 fixed probes per frame); -1 when absent"),
-        "VALID_PROBE_OFFSET_RUN": ("Double", None, "|probe - exact| / exact at the end of the run: what the fixed-probe estimator cost on this validation set; -1 when either is missing"),
+        "VALID_HESSIAN_EXACT_AFTER": ("Double", "eV^2/A^4", "the same quantity for the fine-tuned model, with no estimator noise; -1 when not measured"),
+        "VALID_HESSIAN_PROBE_LAST": ("Double", "eV^2/A^4", "the last epoch's in-loop reading of the same quantity; -1 when absent"),
+        "VALID_PROBE_OFFSET_RUN": ("Double", None, "|probe - exact| / exact at the end of the run; -1 when either is missing"),
         "EXACT_ANCHORS": ("Boolean", None, "the two exact readings were taken (--no-exact-anchors turns them off)"),
         "HESSIAN_CURVE_MOVED": ("Boolean", None, "the validation Hessian term changed across the epochs (a flat curve means the term did not act)"),
         "MACE_VERSION": ("String", None, "mace.__version__ (the fork: 0.3.16+openqha)"),
@@ -176,8 +164,8 @@ SCHEMA = {
         "MACE_FORK_COMMIT": ("String", None, "commit of the mace checkout (refused when unknown or dirty)"),
         "HL_PACKAGE_VERSION": ("String", None, "the openqha-hessian distribution's version (unknown when unreadable)"),
         "HL_PACKAGE_COMMIT": ("String", None, "commit of the package checkout, best-effort (unknown when unreadable)"),
-        "SECONDS": ("Double", "s", "wall time of the whole run"),
-        "SECONDS_PER_EPOCH": ("Double", "s", "wall time / epochs"),
+        "SECONDS": ("Double", "s", "wall time of the mace phase"),
+        "SECONDS_PER_EPOCH": ("Double", "s", "wall time / epochs (the mace phase, amortized)"),
     },
     "Epoch": {
         "EPOCH": ("Integer", None, "epoch index as mace logged it; -1 = the evaluation before any training (the base model)"),
@@ -190,21 +178,6 @@ SCHEMA = {
         "VALID_HESSIAN": ("Double", None, "the Hessian term over the validation pass, the fixed-probe estimator (valid rows)"),
     },
 }
-
-EPOCH_ROW = {
-    "epoch": ("Integer", None, "epoch index (-1 = before any training)"),
-    "split": ("String", None, "train / valid"),
-    "loss": ("Double", None, "total loss"),
-    "rmse_e_per_atom_meV": ("Double", "meV", "energy RMSE per atom"),
-    "rmse_f_meV_A": ("Double", "meV/A", "force RMSE"),
-    "valid_energy": ("Double", None, "energy term over the validation pass"),
-    "valid_forces": ("Double", None, "forces term over the validation pass"),
-    "valid_hessian": ("Double", None, "Hessian term over the validation pass (fixed probes)"),
-}
-
-EPOCH_KEYS = ("epoch", "split", "loss", "rmse_e_per_atom_meV", "rmse_f_meV_A",
-              "valid_energy", "valid_forces", "valid_hessian")
-
 
 def sha256_file(path):
     h = hashlib.sha256()
@@ -846,108 +819,23 @@ def _run_mace(argv, run_dir):
         os.chdir(cwd)
 
 
-def _epoch_row(r):
-    return dict(epoch=r["epoch"], split=r["split"], loss=r.get("loss"),
-                rmse_e_per_atom_meV=r.get("rmse_e_per_atom_meV"), rmse_f_meV_A=r.get("rmse_f_meV_A"),
-                valid_energy=r.get("valid_energy"), valid_forces=r.get("valid_forces"),
-                valid_hessian=r.get("valid_hessian"))
-
-
 def write_record(run_dir, info, epochs):
-    epochs = [_epoch_row(r) for r in epochs]
+    """The Record of one fine-tune: `train.toml` only (user ruling 2026-10-02). The
+    identity fields are the driver's own (frames, the config SHA, the balance, the two
+    exact anchors, the wall clock, the code identities); the recipe in full is the config
+    file CONFIG_SHA256 names, and the per-step curves live in mace's native results file
+    -- never copied here. Only the valid rows are kept, one per epoch: the judge's report
+    heads with them. No train.out report and no train.dat table are written; the run's
+    stdout keeps the summary block."""
     rows = [dict(EPOCH=r["epoch"], SPLIT=r["split"], LOSS=r["loss"],
                  RMSE_E_PER_ATOM_MEV=r["rmse_e_per_atom_meV"], RMSE_F_MEV_A=r["rmse_f_meV_A"],
                  VALID_ENERGY=r["valid_energy"], VALID_FORCES=r["valid_forces"], VALID_HESSIAN=r["valid_hessian"])
-            for r in epochs]
-    missing = prop.write(Path(run_dir) / (STEP + ".toml"), {"Calculation_Info": info, "Epoch": rows},
+            for r in epochs if r["split"] == "valid"]
+    kept = {k: v for k, v in info.items() if k in SCHEMA["Calculation_Info"]}
+    missing = prop.write(Path(run_dir) / (STEP + ".toml"), {"Calculation_Info": kept, "Epoch": rows},
                          SCHEMA, prop.NORMAL_TERMINATION, PROGNAME)
     if missing:
         raise RuntimeError("train.toml keys outside the schema: {}".format(missing))
-    dat.write_table(Path(run_dir) / (STEP + ".dat"), epochs, list(EPOCH_ROW), EPOCH_ROW)
-    _write_report(Path(run_dir) / (STEP + ".out"), info, epochs)
-
-
-def _fmt(v, spec="{:.6e}"):
-    return "-" if v is None else spec.format(v)
-
-
-def _record_num(info, key, default=-1.0):
-    """`info[key]` as a float, or `default` when it is absent or not a number: a report must
-    print what a Record holds, not raise on it."""
-    try:
-        return float(info.get(key, default))
-    except (TypeError, ValueError):
-        return float(default)
-
-
-def _write_report(path, info, epochs):
-    rep = report.Report(PROGNAME, "Fine-tune {!r} of {} on {}".format(
-        info["RUN"], info["FOUNDATION_MODEL"], info["NAME"]))
-    rep.section("the Dataset")
-    for k in ("TAG", "NAME", "LEVEL", "DATASET_DIR", "TRAIN_FILE", "N_TRAIN", "N_TRAIN_HESSIAN",
-              "VALID_FILE", "N_VALID", "N_VALID_HESSIAN"):
-        rep.kv(k, info.get(k))
-    rep.section("the loss (eq. 11; the Cartesian target; T04 / T05)")
-    if info.get("EXACT_ANCHORS") is True and _record_num(info, "VALID_HESSIAN_EXACT_BEFORE") >= 0:
-        b_, a_ = _record_num(info, "VALID_HESSIAN_EXACT_BEFORE"), _record_num(info, "VALID_HESSIAN_EXACT_AFTER")
-        rep.note("EXACT ANCHORS: the full-matrix Hessian term on the validation file, base model "
-                 "{:.4e}{} -- the same quantity the in-loop validation estimates with {} fixed probes per frame. The "
-                 "pair is free of estimator noise; the last epoch's probe reading is {} and its relative distance from "
-                 "the exact value is {}. Neither number is a generalisation reading: the validation frames belong to "
-                 "TRAINING molecules; the judge's test split is where generalisation is read.".format(
-                     b_, "" if a_ < 0 else " -> fine-tuned {:.4e} ({:+.1%})".format(a_, a_ / b_ - 1.0 if b_ else 0.0),
-                     phl_loss.VALID_N_PROBES,
-                     "-" if _record_num(info, "VALID_HESSIAN_PROBE_LAST") < 0 else "{:.4e}".format(_record_num(info, "VALID_HESSIAN_PROBE_LAST")),
-                     "-" if _record_num(info, "VALID_PROBE_OFFSET_RUN") < 0 else "{:.1%}".format(_record_num(info, "VALID_PROBE_OFFSET_RUN"))))
-    for k in ("LOSS", "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "HESSIAN_WEIGHT_RULE",
-              "BALANCE_L_E", "BALANCE_L_F", "BALANCE_L_H", "BALANCE_PROBE", "BALANCE_N_PROBES",
-              "PROBE", "N_PROBES", "VALID_PROBES"):
-        rep.kv(k, info.get(k))
-    if info.get("HESSIAN_WEIGHT_RULE") == "balance":
-        rep.note("HESSIAN_WEIGHT = FORCES_WEIGHT x BALANCE_L_F / BALANCE_L_H: the Hessian term enters the epoch-0 gradient "
-                 "with the force term's share on the base model (T05, section 4); BALANCE_L_H was measured with the run's "
-                 "probe setting ({} k={}) -- the exact full-matrix reading is the anchors' and the judge's job.".format(
-                     info.get("BALANCE_PROBE"), info.get("BALANCE_N_PROBES")))
-    rep.section("the Replay")
-    for k in ("MULTIHEADS", "PT_TRAIN_FILE", "PT_VALID_FILE", "PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN",
-              "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID", "REPLAY_PER_HESSIAN_FRAME",
-              "REAL_PT_DATA_RATIO_THRESHOLD"):
-        rep.kv(k, info.get(k))
-    if info.get("MULTIHEADS"):
-        rep.note("REPLAY_PER_HESSIAN_FRAME = PT_N_FRAMES / N_TRAIN_HESSIAN is the Replay's size as the S0 scan rows "
-                 "R0-R4 define it (R1 ~ 0.3, R2 ~ 1, R3 ~ 4 on draw300); the same file is a different ratio on "
-                 "every Dataset. The counts PT_HEAD_* / FT_HEAD_* are mace's own, parsed from its log, and equal "
-                 "the files' because the duplication threshold is 0.")
-    rep.section("the control (the base's recipe)")
-    for k in ("LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "EMA_DECAY", "SWA", "START_SWA",
-              "SWA_LR", "STAGE_TWO_EPOCH"):
-        rep.kv(k, info.get(k))
-    rep.section("StageTwo weights (w_H^(2) = w_H x w_F^(2) / w_F)")
-    for k in ("SWA_ENERGY_WEIGHT", "SWA_FORCES_WEIGHT", "SWA_HESSIAN_WEIGHT"):
-        rep.kv(k, info.get(k))
-    rep.section("identity")
-    for k in ("FOUNDATION_MODEL", "FOUNDATION_FILE", "MODEL_FILE", "CONFIG_FILE", "CONFIG_SHA256",
-              "MACE_VERSION", "MACE_FORK", "MACE_FORK_COMMIT", "HL_PACKAGE_VERSION", "HL_PACKAGE_COMMIT",
-              "SEED", "DEVICE", "DTYPE"):
-        rep.kv(k, info.get(k))
-    rep.section("cost")
-    for k in ("MAX_NUM_EPOCHS", "N_EPOCHS", "BATCH_SIZE", "SECONDS", "SECONDS_PER_EPOCH"):
-        rep.kv(k, info.get(k))
-    if epochs:
-        curves = validation_curves(epochs)
-        rep.section("validation curves (the three terms per epoch; the Hessian term is the fixed-probe estimator)")
-        rep.kv("HESSIAN_CURVE_MOVED", info.get("HESSIAN_CURVE_MOVED"))
-        if not info.get("HESSIAN_CURVE_MOVED"):
-            rep.note("WARNING: the Hessian term did not move across the validation epochs -- the term did not act "
-                     "(the loss replaced in multihead mode, or w_H 0) or the run is one epoch.")
-        rep.table(["epoch", "split", "loss", "RMSE E/atom meV", "RMSE F meV/A", "valid E term", "valid F term",
-                   "valid H term"],
-                  [[r["epoch"], r["split"], _fmt(r["loss"], "{:.6f}"),
-                    _fmt(r["rmse_e_per_atom_meV"], "{:.2f}"), _fmt(r["rmse_f_meV_A"], "{:.2f}"),
-                    _fmt(r["valid_energy"]), _fmt(r["valid_forces"]), _fmt(r["valid_hessian"])]
-                   for r in epochs])
-        del curves
-    rep.write(path)
 
 
 def registry_entry(info, stamp=None):

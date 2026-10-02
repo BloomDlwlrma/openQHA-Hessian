@@ -6,7 +6,8 @@ foundation's E0s, and carries the probe settings; `--multiheads` adds the replay
 and nothing else does; `split_files` splits the merged Dataset file by its `split` key
 and counts the Hessians; `check_fork` refuses a non-fork and a dirty checkout with a
 message naming the fix, and diagnoses a `mace/` subdirectory of the working directory
-as a shadow of the install; the Record's schema covers every key `run_training` writes and
+as a shadow of the install; the Record's slim schema covers every key the file keeps
+(the info dict may carry more, by design) and
 `parse_results` / `parse_epochs` read mace's two output forms; `registry_entry` names
 the index and the config SHA.
 
@@ -144,10 +145,10 @@ def main():
     except ValueError as exc:
         check("run_training refuses multiheads without a Replay file",
               "--pt-train-file" in str(exc) and "Replay" in str(exc), exc)
-    info_schema = train_run.SCHEMA["Calculation_Info"]
-    check("the schema states the fork's rule: EMA_DECAY typed, the descriptions name it",
-          info_schema["EMA_DECAY"][0] == "Double" and "0.99999" in info_schema["EMA_DECAY"][2]
-          and "0.0001" in info_schema["LR"][2] and "multihead" in info_schema["EMA"][2])
+    epoch_schema = train_run.SCHEMA["Epoch"]
+    check("the Epoch block the judge reads is intact: VALID_ENERGY / VALID_FORCES / VALID_HESSIAN typed",
+          all(epoch_schema[k][0] == "Double" for k in ("VALID_ENERGY", "VALID_FORCES", "VALID_HESSIAN"))
+          and epoch_schema["SPLIT"][0] == "String" and epoch_schema["EPOCH"][0] == "Integer")
     pn = pairs(train_run.mace_argv("t", "v", "r", "/tmp", "/b", "l", ema=False, swa=False))
     check("ema and swa can be switched off (no --ema, no --swa flags)", "--ema" not in pn and "--swa" not in pn and "--start_swa" not in pn)
     check("a bare flag maps to True, not to the next flag's name",
@@ -335,26 +336,23 @@ def main():
           and (b["PROBE"], b["N_PROBES"]) == ("rademacher", 7) and b_def["N_PROBES"] == 4,
           (calls, (b["PROBE"], b["N_PROBES"])))
 
-    # --- the Record's schema covers what run_training writes ---------------------------------------
+    # --- the Record's slim schema covers what the file keeps (user ruling 2026-10-02) --------------
     written = {"RUN", "TAG", "NAME", "LEVEL", "DATASET_DIR", "INDEX_FILE", "TRAIN_FILE", "VALID_FILE",
                "N_TRAIN", "N_TRAIN_HESSIAN", "N_VALID", "N_VALID_HESSIAN", "FOUNDATION_MODEL",
-               "FOUNDATION_FILE", "CONFIG_FILE", "CONFIG_SHA256",
-               "LOSS", "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "PROBE", "N_PROBES",
-               "BALANCE_PROBE", "BALANCE_N_PROBES",
-               "VALID_PROBES", "MAX_NUM_EPOCHS", "BATCH_SIZE", "SEED", "DEVICE", "DTYPE",
-               "MULTIHEADS", "PT_TRAIN_FILE", "PT_VALID_FILE", "PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN",
-               "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID", "REPLAY_PER_HESSIAN_FRAME",
-               "REAL_PT_DATA_RATIO_THRESHOLD", "HESSIAN_CURVE_MOVED", "STAGE_TWO_EPOCH",
-               "LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "SWA", "START_SWA", "SWA_LR",
-               "SWA_ENERGY_WEIGHT", "SWA_FORCES_WEIGHT", "SWA_HESSIAN_WEIGHT",
+               "FOUNDATION_FILE", "MODEL_FILE", "CONFIG_FILE", "CONFIG_SHA256", "LOSS",
+               "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "HESSIAN_WEIGHT_RULE",
+               "BALANCE_L_E", "BALANCE_L_F", "BALANCE_L_H", "BALANCE_PROBE", "BALANCE_N_PROBES",
+               "PROBE", "N_PROBES", "MAX_NUM_EPOCHS", "BATCH_SIZE", "SEED", "DEVICE", "DTYPE",
+               "MULTIHEADS", "PT_TRAIN_FILE", "PT_VALID_FILE", "PT_N_FRAMES", "PT_CONFIG_WEIGHT",
+               "STAGE_TWO_EPOCH", "HESSIAN_CURVE_MOVED", "N_EPOCHS", "SECONDS", "SECONDS_PER_EPOCH",
+               "EXACT_ANCHORS", "VALID_HESSIAN_EXACT_BEFORE", "VALID_HESSIAN_EXACT_AFTER",
+               "VALID_HESSIAN_PROBE_LAST", "VALID_PROBE_OFFSET_RUN",
                "MACE_VERSION", "MACE_FORK", "MACE_FORK_COMMIT",
-               "HL_PACKAGE_VERSION", "HL_PACKAGE_COMMIT",
-               "N_EPOCHS", "SECONDS", "SECONDS_PER_EPOCH",
-               "MODEL_FILE"}
+               "HL_PACKAGE_VERSION", "HL_PACKAGE_COMMIT"}
     schema = set(train_run.SCHEMA["Calculation_Info"])
-    check("every key run_training writes is in the schema", written <= schema, sorted(written - schema))
-    check("the stale NUM_SAMPLES_PT key is gone from the schema; the four PT_* keys are there",
-          "NUM_SAMPLES_PT" not in schema and {"PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_HEAD_TRAIN", "FT_HEAD_TRAIN"} <= schema)
+    check("every kept key is in the schema", written <= schema, sorted(written - schema))
+    check("the stale NUM_SAMPLES_PT key is gone from the schema; the PT_* keys are there",
+          "NUM_SAMPLES_PT" not in schema and {"PT_N_FRAMES", "PT_CONFIG_WEIGHT", "PT_TRAIN_FILE", "PT_VALID_FILE"} <= schema)
     sc = train_run.SCHEMA["Calculation_Info"]
     check("the balance provenance fields are typed and the amended descriptions carry the estimator reading "
           "(measured under the run's probe setting; pre-amendment Records hold the exact full-matrix value)",
@@ -362,8 +360,14 @@ def main():
           and "probe setting" in sc["HESSIAN_WEIGHT_RULE"][2] and "BALANCE_PROBE" in sc["HESSIAN_WEIGHT_RULE"][2]
           and "probe setting" in sc["BALANCE_L_H"][2] and "before the estimator amendment" in sc["BALANCE_L_H"][2],
           (sc.get("BALANCE_PROBE"), sc.get("BALANCE_N_PROBES")))
-    check("the retired weight-identity keys are gone from the schema",
-          not {"FOUNDATION_PARAMS_SHA256", "MODEL_PARAMS_SHA256", "MODEL_N_TENSORS", "ENGINE_PARAMS_SHA256"} & schema)
+    check("the retired keys are gone from the schema (the weight identities, mace's head counts, "
+          "the control block, the validation-probe label)",
+          not {"FOUNDATION_PARAMS_SHA256", "MODEL_PARAMS_SHA256", "MODEL_N_TENSORS", "ENGINE_PARAMS_SHA256",
+               "VALID_PROBES", "PT_HEAD_TRAIN", "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID",
+               "REPLAY_PER_HESSIAN_FRAME", "REAL_PT_DATA_RATIO_THRESHOLD",
+               "LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "EMA_DECAY",
+               "SWA", "START_SWA", "SWA_LR", "SWA_ENERGY_WEIGHT", "SWA_FORCES_WEIGHT",
+               "SWA_HESSIAN_WEIGHT"} & schema)
 
     info = dict(FOUNDATION_MODEL="MACE-OFF23_medium", RUN="w1", INDEX_FILE="/r/index.dat",
                 CONFIG_SHA256="0123456789abcdef" * 4, TAG="draw300", NAME="draw300",
@@ -398,13 +402,14 @@ def main():
                                                rmse_f_meV_A=3.0, valid_energy=1e-4, valid_forces=2e-3,
                                                valid_hessian=0.5)])
         rec = prop.load(Path(td) / "train.toml")
-        check("train.toml round-trips with NORMAL TERMINATION and the epoch block (with the three validation columns)",
+        check("train.toml round-trips with NORMAL TERMINATION; the Epoch block keeps only the valid rows "
+              "and an info key outside the schema (VALID_PROBES) is dropped from the file",
               rec["Calculation_Status"]["STATUS"] == prop.NORMAL_TERMINATION
-              and rec["Calculation_Info"]["RUN"] == "w1" and len(rec["Epoch"]) == 2
-              and rec["Epoch"][1]["VALID_HESSIAN"] == 0.5, rec.get("Calculation_Status"))
-        check("train.out and train.dat are written; the flat-curve warning is in the report",
-              (Path(td) / "train.out").is_file() and (Path(td) / "train.dat").is_file()
-              and "did not move" in (Path(td) / "train.out").read_text(encoding="utf-8"))
+              and rec["Calculation_Info"]["RUN"] == "w1" and len(rec["Epoch"]) == 1
+              and rec["Epoch"][0]["SPLIT"] == "valid" and rec["Epoch"][0]["VALID_HESSIAN"] == 0.5
+              and "VALID_PROBES" not in rec["Calculation_Info"], rec.get("Calculation_Status"))
+        check("the Record is train.toml only (no train.out report, no train.dat table)",
+              not (Path(td) / "train.out").exists() and not (Path(td) / "train.dat").exists())
 
     print("\n{} checks, {} failed".format(43, len(FAIL)))
     return 1 if FAIL else 0
