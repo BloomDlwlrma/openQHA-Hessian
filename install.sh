@@ -8,9 +8,10 @@
 #   * It never creates environments, never activates anything, and never installs or
 #     touches openQHA itself (openQHA is a checkout already on the interpreter's path).
 #   * The fork source is a local checkout by default -- the sibling `../mace` when no
-#     argument is given, or the path argument -- so the default run never touches the
-#     network. `--url` is the explicit opt-in that fetches the fork from its GitHub
-#     branch instead (the CI runs it that way, from a machine that carries no checkout).
+#     argument is given, or the path argument -- so the default run never fetches the
+#     fork from the network. `--url` is the explicit opt-in that fetches the fork from
+#     its GitHub branch instead (the CI runs it that way, from a machine that carries
+#     no checkout).
 #   * Both artifacts are editable by design: `mace_fork_info()` reads the fork's commit
 #     from the `.git` beside the imported package, and the training side refuses a fork
 #     it cannot name. There is no wheel path and no non-editable variant here.
@@ -60,10 +61,12 @@ else
 fi
 
 if [ "$MACE_SRC" != "$MACE_URL" ]; then
-    if [ ! -e "$MACE_SRC" ] && [ -n "$MACE_HINT" ]; then
-        fail "no mace checkout found (looked beside this repository: $MACE_SRC)$MACE_HINT"
+    if [ ! -e "$MACE_SRC" ]; then
+        if [ -n "$MACE_HINT" ]; then
+            fail "no mace checkout found (looked beside this repository: $MACE_SRC)$MACE_HINT"
+        fi
+        fail "mace checkout not found: $MACE_SRC"
     fi
-    [ -e "$MACE_SRC" ] || fail "mace checkout not found: $MACE_SRC"
     [ -d "$MACE_SRC" ] || fail "mace checkout is not a directory: $MACE_SRC$MACE_HINT"
     [ -e "$MACE_SRC/.git" ] || fail "not a git checkout (no .git): $MACE_SRC$MACE_HINT"
     [ -f "$MACE_SRC/mace/__init__.py" ] || \
