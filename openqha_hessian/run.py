@@ -49,14 +49,13 @@ terms per epoch, the loss's `eval_summary` through commit C) are parsed from mac
 
 The Record is what makes a fine-tuned potential traceable: the Dataset and its index, the
 loss settings, the mace fork's commit, the base potential's resolved file and the
-fine-tuned one's, the SHA-256 of the config file, and this package's own version and
-commit. `05_train.py --register` turns those into an `ENGINES` entry.
+fine-tuned one's, the config file the Record names (the full recipe), and this package's
+own version and commit. `05_train.py --register` turns those into an `ENGINES` entry.
 
 Refused, not warned: training against a mace that is not the fork (`mace_fork_commit`
 "unknown"), or against a dirty checkout. A model whose loss cannot be reproduced from a
 commit is not a product.
 """
-import hashlib
 import json
 import os
 import re
@@ -102,11 +101,11 @@ MULTIHEAD_FT_EMA_DECAY = 0.99999
 FLAT_CURVE_TOL = 1e-6
 
 #: The Record's slim identity sheet (user ruling 2026-10-02): only what the driver owns
-#: or measures -- identity, frames, the recipe's SHA, the balance, the two exact anchors,
-#: the clock, the code identities. The full recipe is the config file CONFIG_SHA256 names;
-#: the per-step curves are mace's native results file (never copied here); the mace-parsed
-#: head counts and the derived replay ratio (both printed to stdout) and the control block
-#: are out.
+#: or measures -- identity, frames, the config file, the balance, the two exact anchors,
+#: the clock, the code identities. The recipe in full is the config file the Record
+#: names; the per-step curves are mace's native results file (never copied here); the
+#: mace-parsed head counts and the derived replay ratio (both printed to stdout) and the
+#: control block are out.
 SCHEMA = {
     "Calculation_Info": {
         "PROGNAME": ("String", None, "the step that wrote this file"),
@@ -128,7 +127,6 @@ SCHEMA = {
         "FOUNDATION_FILE": ("String", None, "the resolved weight file of the base potential"),
         "MODEL_FILE": ("String", None, "the fine-tuned potential"),
         "CONFIG_FILE": ("String", None, "the mace argument file (the full recipe)"),
-        "CONFIG_SHA256": ("String", None, "SHA-256 of the config file: the training recipe's identity"),
         "LOSS": ("String", None, "the loss module and factory (mace's --loss external)"),
         "ENERGY_WEIGHT": ("Double", None, "w_E of eq. 11"),
         "FORCES_WEIGHT": ("Double", None, "w_F of eq. 11"),
@@ -178,14 +176,6 @@ SCHEMA = {
         "VALID_HESSIAN": ("Double", None, "the Hessian term over the validation pass, the fixed-probe estimator (valid rows)"),
     },
 }
-
-def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
 
 def check_fork(strict=True):
     """The mace that will train, as an identity. Refuses a non-fork or a dirty checkout
@@ -720,7 +710,7 @@ def run_training(dataset_dir, tag, name, level, run, *, foundation=None, dry_run
         N_TRAIN=counts["train"][0], N_TRAIN_HESSIAN=n_hess,
         N_VALID=counts["valid"][0], N_VALID_HESSIAN=counts["valid"][1],
         FOUNDATION_MODEL=foundation_name, FOUNDATION_FILE=str(foundation_path),
-        CONFIG_FILE=str(config_file), CONFIG_SHA256=sha256_file(config_file),
+        CONFIG_FILE=str(config_file),
         LOSS=LOSS_MODULE,
         ENERGY_WEIGHT=float(settings.get("energy_weight", 1.0)),
         FORCES_WEIGHT=float(settings.get("forces_weight", 100.0)),
@@ -821,9 +811,9 @@ def _run_mace(argv, run_dir):
 
 def write_record(run_dir, info, epochs):
     """The Record of one fine-tune: `train.toml` only (user ruling 2026-10-02). The
-    identity fields are the driver's own (frames, the config SHA, the balance, the two
+    identity fields are the driver's own (frames, the config file, the balance, the two
     exact anchors, the wall clock, the code identities); the recipe in full is the config
-    file CONFIG_SHA256 names, and the per-step curves live in mace's native results file
+    file the Record names, and the per-step curves live in mace's native results file
     -- never copied here. Only the valid rows are kept, one per epoch: the judge's report
     heads with them. No train.out report and no train.dat table are written; the run's
     stdout keeps the summary block."""
@@ -840,10 +830,10 @@ def write_record(run_dir, info, epochs):
 
 def registry_entry(info, stamp=None):
     """The `ENGINES` lines for the fine-tuned potential: the
-    Dataset's index and the config SHA are its `source`, so the numbers can be traced.
-    One fixed revision per run, never a moving pointer: both the key and
-    the file name carry the UTC stamp, and the file lives under `mace_off23_<campaign>/`
-    as `<run>+<YYYYMMDD-HHMMSS>.model`."""
+    Dataset's index and the config file the Record names are its `source`, so the
+    numbers can be traced. One fixed revision per run, never a moving pointer: both the
+    key and the file name carry the UTC stamp, and the file lives under
+    `mace_off23_<campaign>/` as `<run>+<YYYYMMDD-HHMMSS>.model`."""
     stamp = stamp or datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     name = "{}-{}+{}".format(info["TAG"], info["RUN"], stamp)
     filename = "mace_off23_{}/{}+{}.model".format(info["TAG"], info["RUN"], stamp)
@@ -853,7 +843,7 @@ def registry_entry(info, stamp=None):
             info["PT_N_FRAMES"], float(info.get("REPLAY_PER_HESSIAN_FRAME") or 0.0), info.get("PT_CONFIG_WEIGHT"))
     return dict(name=name,
                 filename=filename,
-                source="{} + config {}".format(info["INDEX_FILE"], info["CONFIG_SHA256"][:16]),
+                source="{} + config {}".format(info["INDEX_FILE"], info["CONFIG_FILE"]),
                 note="Fine-tuned on {} ({} frames, {} with Hessians) with the Hessian loss "
                      "(the full Cartesian matrix, w_H {}, probe {} k={}){}; mace fork {}.".format(
                          info["NAME"], info["N_TRAIN"], info["N_TRAIN_HESSIAN"],

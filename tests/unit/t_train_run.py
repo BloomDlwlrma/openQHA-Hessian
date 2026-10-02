@@ -9,7 +9,7 @@ message naming the fix, and diagnoses a `mace/` subdirectory of the working dire
 as a shadow of the install; the Record's slim schema covers every key the file keeps
 (the info dict may carry more, by design) and
 `parse_results` / `parse_epochs` read mace's two output forms; `registry_entry` names
-the index and the config SHA.
+the index and the config file.
 
 The Replay: the argv never contains `num_samples_pt`, contains
 `--real_pt_data_ratio_threshold 0` with `--multiheads` and not without, passes
@@ -339,7 +339,7 @@ def main():
     # --- the Record's slim schema covers what the file keeps (user ruling 2026-10-02) --------------
     written = {"RUN", "TAG", "NAME", "LEVEL", "DATASET_DIR", "INDEX_FILE", "TRAIN_FILE", "VALID_FILE",
                "N_TRAIN", "N_TRAIN_HESSIAN", "N_VALID", "N_VALID_HESSIAN", "FOUNDATION_MODEL",
-               "FOUNDATION_FILE", "MODEL_FILE", "CONFIG_FILE", "CONFIG_SHA256", "LOSS",
+               "FOUNDATION_FILE", "MODEL_FILE", "CONFIG_FILE", "LOSS",
                "ENERGY_WEIGHT", "FORCES_WEIGHT", "HESSIAN_WEIGHT", "HESSIAN_WEIGHT_RULE",
                "BALANCE_L_E", "BALANCE_L_F", "BALANCE_L_H", "BALANCE_PROBE", "BALANCE_N_PROBES",
                "PROBE", "N_PROBES", "MAX_NUM_EPOCHS", "BATCH_SIZE", "SEED", "DEVICE", "DTYPE",
@@ -360,27 +360,31 @@ def main():
           and "probe setting" in sc["HESSIAN_WEIGHT_RULE"][2] and "BALANCE_PROBE" in sc["HESSIAN_WEIGHT_RULE"][2]
           and "probe setting" in sc["BALANCE_L_H"][2] and "before the estimator amendment" in sc["BALANCE_L_H"][2],
           (sc.get("BALANCE_PROBE"), sc.get("BALANCE_N_PROBES")))
-    check("the retired keys are gone from the schema (the weight identities, mace's head counts, "
+    check("the retired keys are gone from the schema (the weight identities, the config SHA, mace's head counts, "
           "the control block, the validation-probe label)",
           not {"FOUNDATION_PARAMS_SHA256", "MODEL_PARAMS_SHA256", "MODEL_N_TENSORS", "ENGINE_PARAMS_SHA256",
+               "CONFIG_SHA256",
                "VALID_PROBES", "PT_HEAD_TRAIN", "PT_HEAD_VALID", "FT_HEAD_TRAIN", "FT_HEAD_VALID",
                "REPLAY_PER_HESSIAN_FRAME", "REAL_PT_DATA_RATIO_THRESHOLD",
                "LR", "SCHEDULER_PATIENCE", "PATIENCE", "EVAL_INTERVAL", "EMA", "EMA_DECAY",
                "SWA", "START_SWA", "SWA_LR", "SWA_ENERGY_WEIGHT", "SWA_FORCES_WEIGHT",
                "SWA_HESSIAN_WEIGHT"} & schema)
+    check("the module is hash-free: no hashlib import, no digest helper (the checksum machinery is out)",
+          "hashlib" not in Path(train_run.__file__).read_text(encoding="utf-8")
+          and not hasattr(train_run, "sha256_file"))
 
     info = dict(FOUNDATION_MODEL="MACE-OFF23_medium", RUN="w1", INDEX_FILE="/r/index.dat",
-                CONFIG_SHA256="0123456789abcdef" * 4, TAG="draw300", NAME="draw300",
+                CONFIG_FILE="/r/train/w1/config.yaml", TAG="draw300", NAME="draw300",
                 N_TRAIN=90, N_TRAIN_HESSIAN=30,
                 HESSIAN_WEIGHT=0.01, PROBE="rademacher", N_PROBES=4,
                 MACE_FORK_COMMIT="b" * 40, MULTIHEADS=True, PT_N_FRAMES=5000,
                 REPLAY_PER_HESSIAN_FRAME=5000 / 30, PT_CONFIG_WEIGHT="1.0")
     e = train_run.registry_entry(info, stamp="20260927-101530")
-    check("registry_entry: a stamped fixed revision (mace_off23_<campaign>/<run>+<stamp>.model), the index + config SHA "
-          "as source, the Replay named, and no fingerprint",
+    check("registry_entry: a stamped fixed revision (mace_off23_<campaign>/<run>+<stamp>.model), the index + "
+          "the config file the Record names as source, the Replay named, and no fingerprint",
           e["name"] == "draw300-w1+20260927-101530"
           and e["filename"] == "mace_off23_draw300/w1+20260927-101530.model"
-          and "/r/index.dat" in e["source"] and "0123456789abcdef" in e["source"]
+          and e["source"] == "/r/index.dat + config /r/train/w1/config.yaml"
           and "params_sha256" not in e and "w_H 0.01" in e["note"] and "Replay 5000 frames" in e["note"]
           and "the full Cartesian matrix" in e["note"], e)
 
@@ -410,8 +414,15 @@ def main():
               and "VALID_PROBES" not in rec["Calculation_Info"], rec.get("Calculation_Status"))
         check("the Record is train.toml only (no train.out report, no train.dat table)",
               not (Path(td) / "train.out").exists() and not (Path(td) / "train.dat").exists())
+        old = (Path(td) / "train.toml").read_text(encoding="utf-8").replace(
+            "[Calculation_Info]", '[Calculation_Info]\nCONFIG_SHA256 = "{}"'.format("0" * 64), 1)
+        (Path(td) / "train_old.toml").write_text(old, encoding="utf-8")
+        rec_old = prop.load(Path(td) / "train_old.toml")["Calculation_Info"]
+        check("a Record written before the checksum retirement still reads: its CONFIG_SHA256 is carried, ignored "
+              "by the reader, and the field is not in the new schema",
+              rec_old["CONFIG_SHA256"] == "0" * 64 and rec_old["RUN"] == "w1" and "CONFIG_SHA256" not in schema)
 
-    print("\n{} checks, {} failed".format(43, len(FAIL)))
+    print("\n{} checks, {} failed".format(45, len(FAIL)))
     return 1 if FAIL else 0
 
 

@@ -140,19 +140,20 @@ def main():
         check("Stage Two switched at epoch 3 and the log names the swa weights (hessian_weight 0.001 x 100 / 100)",
               info["STAGE_TWO_EPOCH"] == 3 and "Stage Two" in log and "hessian_weight=0.001" in log
               and abs(info["SWA_HESSIAN_WEIGHT"] - 1e-3) < 1e-15, (info["STAGE_TWO_EPOCH"], info["SWA_HESSIAN_WEIGHT"]))
-        check("the Record carries the identities (foundation and model files, config SHA, fork commit) and the control",
+        check("the Record carries the identities (foundation and model files, the config file the Record names, fork commit) and the control",
               Path(info["FOUNDATION_FILE"]).is_file() and Path(info["MODEL_FILE"]).is_file()
               and info["FOUNDATION_FILE"] != info["MODEL_FILE"]
-              and len(info["CONFIG_SHA256"]) == 64 and info["MACE_FORK_COMMIT"] != "unknown"
+              and Path(info["CONFIG_FILE"]).is_file() and info["MACE_FORK_COMMIT"] != "unknown"
               and info["SECONDS_PER_EPOCH"] > 0 and info["LR"] == 0.01 and info["SWA_LR"] == 0.00025
               and info["EMA"] is True and info["SWA"] is True and info["START_SWA"] == 3, info)
         rec = prop.load(run_dir / "train.toml")["Calculation_Info"]
-        check("the training Record on disk carries the package identity: the distribution version and the package "
-              "commit (40 hex or unknown)",
+        check("the training Record on disk names the config file and carries no CONFIG_SHA256, and the package "
+              "identity (the distribution version and the package commit, 40 hex or unknown)",
               isinstance(rec["HL_PACKAGE_VERSION"], str) and rec["HL_PACKAGE_VERSION"]
               and (rec["HL_PACKAGE_COMMIT"] == "unknown" or len(rec["HL_PACKAGE_COMMIT"]) == 40)
               and rec["HL_PACKAGE_VERSION"] == info["HL_PACKAGE_VERSION"]
-              and rec["HL_PACKAGE_COMMIT"] == info["HL_PACKAGE_COMMIT"],
+              and rec["HL_PACKAGE_COMMIT"] == info["HL_PACKAGE_COMMIT"]
+              and rec["CONFIG_FILE"] == info["CONFIG_FILE"] and "CONFIG_SHA256" not in rec,
               (rec.get("HL_PACKAGE_VERSION"), rec.get("HL_PACKAGE_COMMIT")))
         print("  {} epochs in {:.1f} s ({:.1f} s per epoch, {} train frames)".format(
             info["N_EPOCHS"], info["SECONDS"], info["SECONDS_PER_EPOCH"], info["N_TRAIN"]))
@@ -214,9 +215,9 @@ def main():
         entry = train_run.registry_entry(info)
         stamp = entry["name"].split("+", 1)[1]
         check("the ENGINES entry is a stamped fixed revision (mace_off23_<campaign>/<run>+<stamp>.model) with the "
-              "index + config SHA as source and no fingerprint",
+              "index + the config file the Record names as source and no fingerprint",
               entry["name"].startswith("test-cart4+") and entry["filename"] == "mace_off23_test/cart4+{}.model".format(stamp)
-              and "config" in entry["source"] and "params_sha256" not in entry, entry)
+              and info["CONFIG_FILE"] in entry["source"] and "params_sha256" not in entry, entry)
 
         # --- (18) the Replay: two frames with config_weight 3, three epochs -------------------------
         pt = Path(tmp) / "pt.xyz"
