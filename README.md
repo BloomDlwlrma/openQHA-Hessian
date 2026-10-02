@@ -77,14 +77,18 @@ Hessian labels and the external loss, the fork must be installed editable; insid
 already-activated environment, one script does it together with this package:
 
 ```bash
-bash install.sh                  # the fork from its GitHub branch (needs network)
-bash install.sh /path/to/mace    # the fork from a local checkout (offline / Tianhe)
+bash install.sh                  # the fork from the sibling ../mace checkout (offline)
+bash install.sh /path/to/mace    # the fork from a checkout elsewhere
 ```
 
 `install.sh` uninstalls any `mace-torch` wheel, editable-installs the fork and this
 package, and verifies its own end state -- import location, version `0.3.16+openqha`,
 tracked-clean checkout, `mace_fork_info()` full commit, `import openqha_hessian` -- and
-exits non-zero if any of it fails. Re-running is safe.
+exits non-zero if any of it fails. Re-running is safe. With no argument it reads the
+`mace` checkout beside this repository -- the layout the training machines and Tianhe
+carry; when there is none it stops before touching anything and names both remedies: a
+path, or the explicit network opt-in `bash install.sh --url` (the mode CI runs, from a
+machine that carries no checkout).
 
 Run it last -- or again after any re-run of openQHA's `install_dependency.sh`: that
 installer reinstalls the fork from its requirement line (non-editable) and would replace
@@ -93,11 +97,11 @@ the editable install.
 Editable is not an accident: `mace_fork_info()` reads the fork's commit from the `.git`
 beside the imported package, and the training side refuses a fork it cannot name.
 
-By hand, the same steps:
+By hand, the same steps (fork from the checkout beside this repository):
 
 ```bash
 python -m pip uninstall -y mace-torch
-python -m pip install -e "git+https://github.com/BloomDlwlrma/mace.git@openqha-hessian#egg=mace-torch"
+python -m pip install -e ../mace
 python -m pip install -e .
 ```
 

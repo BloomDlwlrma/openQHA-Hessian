@@ -1,6 +1,6 @@
-# The public install path on a clean machine:
-# install.sh in URL mode, then the two tests that need nothing from the openQHA
-# checkout. The full suite stays local / Tianhe.
+# The public install path on a clean machine -- which carries no mace checkout, so it
+# runs install.sh in its explicit URL mode -- then the two tests that need nothing from
+# the openQHA checkout. The full suite stays local / Tianhe.
 name: ci
 
 on:
@@ -19,8 +19,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - name: Install the mace fork and the package (install.sh, URL mode)
-        run: bash install.sh
+      - name: Install the mace fork and the package (install.sh, explicit URL opt-in)
+        run: bash install.sh --url
       - name: Hessian-vector product on a toy potential (t_hvp)
         run: python tests/unit/t_hvp.py
       - name: PHL loss on a toy potential (t_phl_loss)
